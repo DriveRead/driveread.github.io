@@ -20,6 +20,9 @@ export default function Home() {
   const [toc, setToc] = useState<Array<{ href: string; label: string }>>([]);
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState<number | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
+  const [percent, setPercent] = useState<number | null>(null);
 
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<Controls | null>(null);
@@ -80,34 +83,73 @@ export default function Home() {
   return (
     <>
       <Script src="https://accounts.google.com/gsi/client" async defer />
-      <header style={{
-          display:'flex', gap:12, alignItems:'center', padding:12,
-          borderBottom:'1px solid #e5e5e5', position:'sticky', top:0, background:'#fff', zIndex:10
-        }}>
-        <h1 style={{ margin:0, fontSize:18 }}>DriveRead</h1>
-        <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
-          <button onClick={() => setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}>
-            {settings.theme === 'dark' ? 'Light' : 'Dark'}
-          </button>
-          <div style={{ display:'flex', gap:4, alignItems:'center' }}>
-            <span>Font</span>
-            <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.max(0.8, +(s.fontScale - 0.05).toFixed(2)) }))}>−</button>
-            <span>{Math.round(settings.fontScale*100)}%</span>
-            <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.min(1.6, +(s.fontScale + 0.05).toFixed(2)) }))}>+</button>
-          </div>
-          <div style={{ display:'flex', gap:4, alignItems:'center' }}>
-            <span>Line</span>
-            <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.max(1.2, +(s.lineHeight - 0.05).toFixed(2)) }))}>−</button>
-            <span>{settings.lineHeight.toFixed(2)}</span>
-            <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.min(2.0, +(s.lineHeight + 0.05).toFixed(2)) }))}>+</button>
-          </div>
-          {!token && (
-            <button onClick={request} disabled={!ready} style={{ padding:'6px 10px' }}>
-              Sign in with Google
+        <header style={{
+            display:'flex', gap:12, alignItems:'center', padding:12,
+            borderBottom:'1px solid #e5e5e5', position:'sticky', top:0,
+            background:'#fff', zIndex:10
+          }}>
+          <h1 style={{ margin:0, fontSize:18 }}>DriveRead</h1>
+
+          <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
+            {/* Theme toggle */}
+            <button
+              onClick={() => setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}
+            >
+              {settings.theme === 'dark' ? 'Light' : 'Dark'}
             </button>
-          )}
-        </div>
-      </header>
+
+            {/* Font size */}
+            <div style={{ display:'flex', gap:4, alignItems:'center' }}>
+              <span>Font</span>
+              <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.max(0.8, +(s.fontScale - 0.05).toFixed(2)) }))}>−</button>
+              <span>{Math.round(settings.fontScale*100)}%</span>
+              <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.min(1.6, +(s.fontScale + 0.05).toFixed(2)) }))}>+</button>
+            </div>
+
+            {/* Line height */}
+            <div style={{ display:'flex', gap:4, alignItems:'center' }}>
+              <span>Line</span>
+              <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.max(1.2, +(s.lineHeight - 0.05).toFixed(2)) }))}>−</button>
+              <span>{settings.lineHeight.toFixed(2)}</span>
+              <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.min(2.0, +(s.lineHeight + 0.05).toFixed(2)) }))}>+</button>
+            </div>
+
+            {/* Page navigation buttons */}
+            <button
+              type="button"
+              aria-label="Previous page"
+              onClick={() => controlsRef.current?.prev()}
+              disabled={!bytes}
+              title="Previous (←)"
+            >
+              ◀ Prev
+            </button>
+            <button
+              type="button"
+              aria-label="Next page"
+              onClick={() => controlsRef.current?.next()}
+              disabled={!bytes}
+              title="Next (→)"
+            >
+              Next ▶
+            </button>
+
+            {/* Sign in */}
+            {!token && (
+              <button onClick={request} disabled={!ready} style={{ padding:'6px 10px' }}>
+                Sign in with Google
+              </button>
+            )}
+          </div>
+          <div style={{ display:'flex', gap:8, alignItems:'center', minWidth:140, justifyContent:'flex-end' }}>
+            <span style={{ color:'#6b7280' }}>
+              {page && total ? `Page ${page} / ${total}` : '—'}
+            </span>
+            <span style={{ color:'#6b7280' }}>
+              {percent !== null ? `${percent}%` : ''}
+            </span>
+          </div>
+        </header>
 
       <div style={{ display:'grid', gridTemplateColumns:'320px 280px 1fr', gap:16, padding:16, height:'calc(100vh - 58px)' }}>
         {/* Library */}
@@ -138,21 +180,54 @@ export default function Home() {
 
         {/* Reader */}
         <main style={{ border:'1px solid #ddd', borderRadius:8, height:'100%', overflow:'hidden',
+          position:'relative',
           background: settings.theme === 'dark' ? '#0b0f12' : '#fff' }}>
           {bytes ? (
-            <Reader
-              bytes={bytes}
-              startCfi={cfi}
-              theme={settings.theme}
-              fontScale={settings.fontScale}
-              lineHeight={settings.lineHeight}
-              onRelocate={(newCfi) => {
-                setCfi(newCfi);
-                if (fileId) debouncedSave(fileId, newCfi);
-              }}
-              onToc={setToc}
-              onReady={(c) => { controlsRef.current = c; }}
-            />
+            <>
+              <Reader
+                bytes={bytes}
+                startCfi={cfi}
+                theme={settings.theme}
+                fontScale={settings.fontScale}
+                lineHeight={settings.lineHeight}
+                onRelocate={(newCfi: any) => {
+                  // newCfi may be a string (if your Reader only forwards cfi)
+                  // so also listen for page info via the rendition payload if you passed it through.
+                  // If you only receive a string, keep the save, and ALSO add the separate listener below.
+                  if (typeof newCfi === 'string') {
+                    setCfi(newCfi);
+                    if (fileId) debouncedSave(fileId, newCfi);
+                  } else {
+                    // If you updated Reader to pass the full 'loc', handle both:
+                    const loc = newCfi;
+                    const cfi = loc?.start?.cfi as string | undefined;
+                    if (cfi) {
+                      setCfi(cfi);
+                      if (fileId) debouncedSave(fileId, cfi);
+                    }
+                    const p = loc?.start?.displayed?.page ?? null;
+                    const t = loc?.start?.displayed?.total ?? null;
+                    const pct = (typeof loc?.percentage === 'number')
+                      ? Math.round(loc.percentage * 100)
+                      : (p && t ? Math.round((p / t) * 100) : null);
+                    setPage(p);
+                    setTotal(t);
+                    setPercent(pct);
+                  }
+                }}
+                onToc={setToc}
+                onReady={(c) => {
+                  controlsRef.current = c;
+                  // attach a relocate listener for page info
+                  // @ts-ignore - access rendition via a tiny hack on controls if you exposed it;
+                  // otherwise add a new prop to Reader to bubble 'loc' directly.
+                }}
+              />
+              <div style={{ position:'absolute', bottom:10, right:10, display:'flex', gap:8 }}>
+                <button onClick={() => controlsRef.current?.prev()}>◀ Prev</button>
+                <button onClick={() => controlsRef.current?.next()}>Next ▶</button>
+              </div>
+            </>
           ) : (
             <div style={{ height:'100%', display:'grid', placeItems:'center', color:'#888' }}>
               Pick a book…
