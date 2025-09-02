@@ -1,0 +1,27 @@
+{
+  "name": "driveread",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && next export",
+    "start": "serve out -p 3000",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "epubjs": "^0.3.93",
+    "next": "14.2.5",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.5",
+    "typescript": "^5.5.4",
+    "serve": "^14.2.3"
+  }
+}
