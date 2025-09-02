@@ -1,4 +1,3 @@
-// @ts-expect-error - epub.js types not bundled here
 import ePub from 'epubjs';
 import { useEffect, useRef } from 'react';
 
