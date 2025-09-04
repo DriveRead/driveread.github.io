@@ -23,6 +23,7 @@ export default function Home() {
   const [page, setPage] = useState<number | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [percent, setPercent] = useState<number | null>(null);
+  const [focusMode, setFocusMode] = useState(false);
 
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<Controls | null>(null);
@@ -83,6 +84,8 @@ export default function Home() {
   return (
     <>
       <Script src="https://accounts.google.com/gsi/client" async defer />
+
+      {!focusMode && (
         <header style={{
             display:'flex', gap:12, alignItems:'center', padding:12,
             borderBottom:'1px solid #e5e5e5', position:'sticky', top:0,
@@ -95,6 +98,14 @@ export default function Home() {
               onClick={() => setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}
             >
               {settings.theme === 'dark' ? 'Light' : 'Dark'}
+            </button>
+          {/* focus mode */}
+            <button
+              type="button"
+              onClick={() => setFocusMode(true)}
+              disabled={!bytes}
+            >
+              Focus Mode
             </button>
 
             {/* Font size */}
@@ -171,22 +182,32 @@ export default function Home() {
             </span>
           </div>
         </header>
-
-      <div style={{ display:'grid', gridTemplateColumns:'320px 280px 1fr', gap:16, padding:16, height:'calc(100vh - 58px)' }}>
+      )}
+      <div
+        style={{
+          display:'grid',
+          gridTemplateColumns: focusMode ? '1fr' : '320px 280px 1fr',
+          gap:16,
+          padding:16,
+          height:'calc(100vh - 58px)'
+        }}
+      >
         {/* Library */}
-        <aside style={{ overflow:'auto', border:'1px solid #ddd', borderRadius:8, padding:8 }}>
-          <h3 style={{ marginTop:0 }}>Your Drive EPUBs</h3>
-          {!token && <p>Sign in to list files.</p>}
-          {error && <p style={{ color:'#b00' }}>{error}</p>}
-          {files.map(f => (
-            <button key={f.id} onClick={() => openFile(f.id)}
-              style={{ display:'block', width:'100%', textAlign:'left', padding:'6px 8px', borderRadius:6, border:'1px solid #eee', marginBottom:6 }}>
-              {f.name}
-            </button>
-          ))}
-        </aside>
-
+         {!focusMode && (
+          <aside style={{ overflow:'auto', border:'1px solid #ddd', borderRadius:8, padding:8 }}>
+            <h3 style={{ marginTop:0 }}>Your Drive EPUBs</h3>
+            {!token && <p>Sign in to list files.</p>}
+            {error && <p style={{ color:'#b00' }}>{error}</p>}
+            {files.map(f => (
+              <button key={f.id} onClick={() => openFile(f.id)}
+                style={{ display:'block', width:'100%', textAlign:'left', padding:'6px 8px', borderRadius:6, border:'1px solid #eee', marginBottom:6 }}>
+                {f.name}
+              </button>
+            ))}
+          </aside>
+        )}
         {/* TOC */}
+        {!focusMode && (
         <aside style={{ overflow:'auto', border:'1px solid #ddd', borderRadius:8, padding:8 }}>
           <h3 style={{ marginTop:0 }}>Contents</h3>
           {toc.length === 0 && <p style={{ color:'#888' }}>—</p>}
@@ -198,7 +219,7 @@ export default function Home() {
             </button>
           ))}
         </aside>
-
+        )}
         {/* Reader */}
         <main style={{ border:'1px solid #ddd', borderRadius:8, height:'100%', overflow:'hidden',
           position:'relative',
@@ -233,6 +254,9 @@ export default function Home() {
               <div style={{ position:'absolute', bottom:10, right:10, display:'flex', gap:8 }}>
                 <button onClick={() => controlsRef.current?.prev()}>◀ Prev</button>
                 <button onClick={() => controlsRef.current?.next()}>Next ▶</button>
+                {focusMode && (
+                  <button onClick={() => setFocusMode(false)}>Exit Focus</button>
+                )}
               </div>
             </>
           ) : (
