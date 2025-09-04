@@ -134,6 +134,28 @@ export default function Home() {
               Next ▶
             </button>
 
+            // inside the header toolbar block
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <label htmlFor="ff" style={{ color:'#6b7280' }}>Font</label>
+              <select
+                id="ff"
+                value={settings.fontFamily}
+                onChange={(e) =>
+                  setSettings(s => ({ ...s, fontFamily: e.target.value as any }))
+                }
+                style={{ padding:'6px 8px', border:'1px solid #e5e7eb', borderRadius:6 }}
+              >
+                <option value="os">OS Default</option>
+                <option value="sans">Sans (system)</option>
+                <option value="serif">Serif</option>
+                <option disabled>────────</option>
+                <option value="opendyslexic">Open Dyslexic</option>
+                <option value="atkinson">Atkinson Hyperlegible</option>
+                <option value="roboto">Roboto</option>
+                <option value="robotomono">Roboto Mono</option>
+              </select>
+            </div>
+
             {/* Sign in */}
             {!token && (
               <button onClick={request} disabled={!ready} style={{ padding:'6px 10px' }}>
