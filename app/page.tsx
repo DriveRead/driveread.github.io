@@ -89,7 +89,6 @@ export default function Home() {
             background:'#fff', zIndex:10
           }}>
           <h1 style={{ margin:0, fontSize:18 }}>DriveRead</h1>
-
           <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
             {/* Theme toggle */}
             <button
@@ -100,7 +99,7 @@ export default function Home() {
 
             {/* Font size */}
             <div style={{ display:'flex', gap:4, alignItems:'center' }}>
-              <span>Font</span>
+              <span>Size</span>
               <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.max(0.8, +(s.fontScale - 0.05).toFixed(2)) }))}>−</button>
               <span>{Math.round(settings.fontScale*100)}%</span>
               <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.min(1.6, +(s.fontScale + 0.05).toFixed(2)) }))}>+</button>
@@ -112,6 +111,26 @@ export default function Home() {
               <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.max(1.2, +(s.lineHeight - 0.05).toFixed(2)) }))}>−</button>
               <span>{settings.lineHeight.toFixed(2)}</span>
               <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.min(2.0, +(s.lineHeight + 0.05).toFixed(2)) }))}>+</button>
+            </div>
+
+            {/* Font family */}
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <label htmlFor="ff" style={{ color:'#6b7280' }}>Family</label>
+              <select
+                id="ff"
+                value={settings.fontFamily}
+                onChange={(e) => setSettings(s => ({ ...s, fontFamily: e.target.value as any }))}
+                style={{ padding:'6px 8px', border:'1px solid #e5e7eb', borderRadius:6 }}
+              >
+                <option value="os">OS Default</option>
+                <option value="sans">Sans (system)</option>
+                <option value="serif">Serif</option>
+                <option disabled>────────</option>
+                <option value="opendyslexic">Open Dyslexic</option>
+                <option value="atkinson">Atkinson Hyperlegible</option>
+                <option value="roboto">Roboto</option>
+                <option value="robotomono">Roboto Mono</option>
+              </select>
             </div>
 
             {/* Page navigation buttons */}
@@ -134,28 +153,6 @@ export default function Home() {
               Next ▶
             </button>
 
-            // inside the header toolbar block
-            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-              <label htmlFor="ff" style={{ color:'#6b7280' }}>Font</label>
-              <select
-                id="ff"
-                value={settings.fontFamily}
-                onChange={(e) =>
-                  setSettings(s => ({ ...s, fontFamily: e.target.value as any }))
-                }
-                style={{ padding:'6px 8px', border:'1px solid #e5e7eb', borderRadius:6 }}
-              >
-                <option value="os">OS Default</option>
-                <option value="sans">Sans (system)</option>
-                <option value="serif">Serif</option>
-                <option disabled>────────</option>
-                <option value="opendyslexic">Open Dyslexic</option>
-                <option value="atkinson">Atkinson Hyperlegible</option>
-                <option value="roboto">Roboto</option>
-                <option value="robotomono">Roboto Mono</option>
-              </select>
-            </div>
-
             {/* Sign in */}
             {!token && (
               <button onClick={request} disabled={!ready} style={{ padding:'6px 10px' }}>
@@ -163,6 +160,8 @@ export default function Home() {
               </button>
             )}
           </div>
+
+
           <div style={{ display:'flex', gap:8, alignItems:'center', minWidth:140, justifyContent:'flex-end' }}>
             <span style={{ color:'#6b7280' }}>
               {page && total ? `Page ${page} / ${total}` : '—'}
@@ -212,38 +211,24 @@ export default function Home() {
                 theme={settings.theme}
                 fontScale={settings.fontScale}
                 lineHeight={settings.lineHeight}
-                onRelocate={(newCfi: any) => {
-                  // newCfi may be a string (if your Reader only forwards cfi)
-                  // so also listen for page info via the rendition payload if you passed it through.
-                  // If you only receive a string, keep the save, and ALSO add the separate listener below.
-                  if (typeof newCfi === 'string') {
+                fontFamily={settings.fontFamily}
+                onRelocate={(loc: any) => {
+                  const newCfi: string | undefined = loc?.start?.cfi;
+                  if (newCfi) {
                     setCfi(newCfi);
                     if (fileId) debouncedSave(fileId, newCfi);
-                  } else {
-                    // If you updated Reader to pass the full 'loc', handle both:
-                    const loc = newCfi;
-                    const cfi = loc?.start?.cfi as string | undefined;
-                    if (cfi) {
-                      setCfi(cfi);
-                      if (fileId) debouncedSave(fileId, cfi);
-                    }
-                    const p = loc?.start?.displayed?.page ?? null;
-                    const t = loc?.start?.displayed?.total ?? null;
-                    const pct = (typeof loc?.percentage === 'number')
-                      ? Math.round(loc.percentage * 100)
-                      : (p && t ? Math.round((p / t) * 100) : null);
-                    setPage(p);
-                    setTotal(t);
-                    setPercent(pct);
                   }
+                  const p = loc?.start?.displayed?.page ?? null;
+                  const t = loc?.start?.displayed?.total ?? null;
+                  const pct = (typeof loc?.percentage === 'number')
+                    ? Math.round(loc.percentage * 100)
+                    : (p && t ? Math.round((p / t) * 100) : null);
+                  setPage(p);
+                  setTotal(t);
+                  setPercent(pct);
                 }}
                 onToc={setToc}
-                onReady={(c) => {
-                  controlsRef.current = c;
-                  // attach a relocate listener for page info
-                  // @ts-ignore - access rendition via a tiny hack on controls if you exposed it;
-                  // otherwise add a new prop to Reader to bubble 'loc' directly.
-                }}
+                onReady={(c) => { controlsRef.current = c; }}
               />
               <div style={{ position:'absolute', bottom:10, right:10, display:'flex', gap:8 }}>
                 <button onClick={() => controlsRef.current?.prev()}>◀ Prev</button>
