@@ -9,10 +9,18 @@ export function useGoogleToken(
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const onLoad = () => setReady(true);
-    if (window.google) setReady(true);
-    else window.addEventListener('load', onLoad);
-    return () => window.removeEventListener('load', onLoad);
+    if (window.google) {
+      setReady(true);
+      return;
+    }
+    // Poll for the google object to appear. This is more robust than a `load` listener.
+    const interval = setInterval(() => {
+      if (window.google) {
+        setReady(true);
+        clearInterval(interval);
+      }
+    }, 100);
+    return () => clearInterval(interval);
   }, []);
 
   function request() {

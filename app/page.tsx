@@ -18,7 +18,7 @@ export default function Home() {
   const [fileId, setFileId] = useState<string | null>(null);
   const [cfi, setCfi] = useState<string | undefined>();
   const [toc, setToc] = useState<Array<{ href: string; label: string }>>([]);
-  const [settings, setSettings] = useState<Settings>(() => loadSettings());
+  const [settings, setSettings] = useState<Settings>({ theme: 'light', fontScale: 1.0, lineHeight: 1.5, fontFamily: 'os' });
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<number | null>(null);
   const [total, setTotal] = useState<number | null>(null);
@@ -37,6 +37,11 @@ export default function Home() {
     if (!token) return;
     listEpubs(token).then(d => setFiles(d.files)).catch(e => setError(String(e)));
   }, [token]);
+
+  useEffect(() => {
+    // Load settings from localStorage on the client side only to avoid hydration mismatch
+    setSettings(loadSettings());
+  }, []);
 
   async function openFile(id: string) {
     if (!token) return;
