@@ -26,16 +26,26 @@ const isDebug = typeof window !== 'undefined' && window.location.search.includes
 
 export async function listEpubs(token: string) {
   if (isDebug) console.log('listEpubs: fetching epubs...');
-  const epubRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=fileExtension='epub' and trashed=false&fields=files(id,name,modifiedTime,parents,size,iconLink)&pageSize=1000&orderBy=modifiedTime desc`, {
+  const epubParams = new URLSearchParams({
+    q: "fileExtension='epub' and trashed=false",
+    fields: 'files(id,name,modifiedTime,parents,size,iconLink)',
+    pageSize: '1000',
+    orderBy: 'modifiedTime desc',
+  });
+  const epubRes = await fetch(`https://www.googleapis.com/drive/v3/files?${epubParams.toString()}`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (!epubRes.ok) throw new Error(await epubRes.text());
   const epubData: { files: DriveFileResource[] } = await epubRes.json();
   if (isDebug) console.log('listEpubs: received epub data', epubData);
 
-
   if (isDebug) console.log('listEpubs: fetching folders...');
-  const folderRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name,parents)&pageSize=1000`, {
+  const folderParams = new URLSearchParams({
+    q: "mimeType='application/vnd.google-apps.folder' and trashed=false",
+    fields: 'files(id,name,parents)',
+    pageSize: '1000',
+  });
+  const folderRes = await fetch(`https://www.googleapis.com/drive/v3/files?${folderParams.toString()}`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (!folderRes.ok) throw new Error(await folderRes.text());
