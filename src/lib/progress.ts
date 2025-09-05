@@ -1,31 +1,29 @@
 // src/lib/progress.ts
-type Saved = { cfi: string; ts: number };
 
 const KEY = 'driveread.progress.v1';
 
-function readAll(): Record<string, Saved> {
+export type ProgressItem = { cfi: string; updated: number };
+export type Progress = { [key: string]: ProgressItem };
+
+export function loadAllLocalProgress(): Progress {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+export function saveAllLocalProgress(p: Progress) {
+  try { localStorage.setItem(KEY, JSON.stringify(p)); } catch {}
+}
+
+export function mergeProgress(local: Progress, remote: Progress): Progress {
+  const merged = { ...local };
+  for (const fileId in remote) {
+    if (!local[fileId] || local[fileId].updated < remote[fileId].updated) {
+      merged[fileId] = remote[fileId];
+    }
   }
+  return merged;
 }
 
-function writeAll(map: Record<string, Saved>) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(map));
-  } catch { /* storage full or blocked; ignore */ }
-}
-
-export function loadProgress(fileId: string): string | undefined {
-  const all = readAll();
-  return all[fileId]?.cfi;
-}
-
-export function saveProgress(fileId: string, cfi: string) {
-  if (!fileId || !cfi) return;
-  const all = readAll();
-  all[fileId] = { cfi, ts: Date.now() };
-  writeAll(all);
-}
