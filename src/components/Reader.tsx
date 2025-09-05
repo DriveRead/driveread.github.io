@@ -1,6 +1,6 @@
 import ePub from 'epubjs';
 import { useEffect, useRef } from 'react';
-import type { Theme, FontFamily } from '@/src/lib/settings';
+import type { Theme, FontFamily, Flow } from '@/src/lib/settings';
 
 type Controls = {
   goTo: (hrefOrCfi: string) => Promise<void>;
@@ -18,6 +18,7 @@ export default function Reader({
   fontScale = 1.0,
   lineHeight = 1.5,
   fontFamily = 'os',
+  flow = 'paginated',
 }: {
   bytes: ArrayBuffer;
   startCfi?: string;
@@ -28,20 +29,23 @@ export default function Reader({
   fontScale?: number;
   lineHeight?: number;
   fontFamily?: FontFamily;
+  flow?: Flow;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<any>(null);
   const bookRef = useRef<any>(null);
+  const isFirstLayoutEffect = useRef(true);
 
   // Initialise book + rendition
   useEffect(() => {
     const book = ePub(bytes);
     bookRef.current = book;
+    isFirstLayoutEffect.current = true; // Reset for new book
 
     const rendition = book.renderTo(containerRef.current!, {
       width: '100%',
       height: '100%',
-      flow: 'paginated',
+      flow,
       spread: 'auto',
     });
     renditionRef.current = rendition;
@@ -99,12 +103,25 @@ export default function Reader({
     };
   }, [bytes]);
 
-  // Apply theme / typography / font family
+  // Apply flow
+  useEffect(() => {
+    const r = renditionRef.current;
+    if (!r) return;
+    r.flow(flow);
+  }, [flow]);
+
+  // Apply theme
+  useEffect(() => {
+    const r = renditionRef.current;
+    if (!r) return;
+    r.themes.select(theme);
+  }, [theme]);
+
+  // Apply typography / font family and re-render if needed
   useEffect(() => {
     const r = renditionRef.current;
     if (!r) return;
 
-    r.themes.select(theme);
     r.themes.fontSize(`${Math.round(fontScale * 100)}%`);
     r.themes.override('line-height', String(lineHeight));
 
@@ -118,23 +135,33 @@ export default function Reader({
       : 'Roboto Mono, ui-monospace, monospace'; // robotomono
 
     r.themes.override('font-family', cssFamily);
-  }, [theme, fontScale, lineHeight, fontFamily]);
+
+    if (isFirstLayoutEffect.current) {
+      isFirstLayoutEffect.current = false;
+    } else if (r.location) {
+      r.display(r.location.start.cfi);
+    }
+  }, [fontScale, lineHeight, fontFamily]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* Click zones for paging */}
-      <div
-        onClick={() => renditionRef.current?.prev()}
-        style={{ position: 'absolute', inset: '0 80% 0 0', cursor: 'w-resize' }}
-        aria-hidden
-        title="Previous page"
-      />
-      <div
-        onClick={() => renditionRef.current?.next()}
-        style={{ position: 'absolute', inset: '0 0 0 80%', cursor: 'e-resize' }}
-        aria-hidden
-        title="Next page"
-      />
+      {flow === 'paginated' && (
+        <>
+          {/* Click zones for paging */}
+          <div
+            onClick={() => renditionRef.current?.prev()}
+            style={{ position: 'absolute', inset: '0 80% 0 0', cursor: 'w-resize' }}
+            aria-hidden
+            title="Previous page"
+          />
+          <div
+            onClick={() => renditionRef.current?.next()}
+            style={{ position: 'absolute', inset: '0 0 0 80%', cursor: 'e-resize' }}
+            aria-hidden
+            title="Next page"
+          />
+        </>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 declare global { interface Window { google: any } }
 
 export function useGoogleToken(
-  scope: string = 'https://www.googleapis.com/auth/drive.readonly'
+  scope: string = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.readonly'
 ) {
   const [token, setToken] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
