@@ -24,9 +24,12 @@ export default function Home() {
   const [total, setTotal] = useState<number | null>(null);
   const [percent, setPercent] = useState<number | null>(null);
   const [focusMode, setFocusMode] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<Controls | null>(null);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
 
   function debouncedSave(fid: string, newCfi: string) {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -34,20 +37,40 @@ export default function Home() {
   }
 
   useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (settingsMenuRef.current && !settingsMenuRef.current.contains(event.target as Node)) {
+        setSettingsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
     if (!token) return;
     listEpubs(token).then(d => setFiles(d.files)).catch(e => setError(String(e)));
   }, [token]);
-
+  
   async function openFile(id: string) {
     if (!token) return;
+    setLoading(true);
+    setBytes(null);
+    setFileId(null);
+    setCfi(undefined);
+    setToc([]);
+    setPage(null);
+    setTotal(null);
+    setPercent(null);
+    setError(null);
     try {
       const buf = await downloadArrayBuffer(token, id);
       setFileId(id);
       setBytes(buf);
       setCfi(loadProgress(id));
-      setToc([]);
     } catch (e: any) {
       setError(String(e));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -76,10 +99,13 @@ export default function Home() {
       if (e.key.toLowerCase() === 'd') { // toggle dark
         e.preventDefault(); setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }));
       }
+      if (e.key === 'Escape' && focusMode) {
+        setFocusMode(false);
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [focusMode]);
 
   return (
     <>
@@ -92,91 +118,122 @@ export default function Home() {
             background:'#fff', zIndex:10
           }}>
           <h1 style={{ margin:0, fontSize:18 }}>DriveRead</h1>
-          <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
-            {/* Theme toggle */}
-            <button
-              onClick={() => setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}
-            >
-              {settings.theme === 'dark' ? 'Light' : 'Dark'}
-            </button>
-          {/* focus mode */}
-            <button
-              type="button"
-              onClick={() => setFocusMode(true)}
-              disabled={!bytes}
-            >
-              Focus Mode
-            </button>
-
-            {/* Font size */}
-            <div style={{ display:'flex', gap:4, alignItems:'center' }}>
-              <span>Size</span>
-              <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.max(0.8, +(s.fontScale - 0.05).toFixed(2)) }))}>−</button>
-              <span>{Math.round(settings.fontScale*100)}%</span>
-              <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.min(1.6, +(s.fontScale + 0.05).toFixed(2)) }))}>+</button>
-            </div>
-
-            {/* Line height */}
-            <div style={{ display:'flex', gap:4, alignItems:'center' }}>
-              <span>Line</span>
-              <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.max(1.2, +(s.lineHeight - 0.05).toFixed(2)) }))}>−</button>
-              <span>{settings.lineHeight.toFixed(2)}</span>
-              <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.min(2.0, +(s.lineHeight + 0.05).toFixed(2)) }))}>+</button>
-            </div>
-
-            {/* Font family */}
-            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-              <label htmlFor="ff" style={{ color:'#6b7280' }}>Family</label>
-              <select
-                id="ff"
-                value={settings.fontFamily}
-                onChange={(e) => setSettings(s => ({ ...s, fontFamily: e.target.value as any }))}
-                style={{ padding:'6px 8px', border:'1px solid #e5e7eb', borderRadius:6 }}
-              >
-                <option value="os">OS Default</option>
-                <option value="sans">Sans (system)</option>
-                <option value="serif">Serif</option>
-                <option disabled>────────</option>
-                <option value="opendyslexic">Open Dyslexic</option>
-                <option value="atkinson">Atkinson Hyperlegible</option>
-                <option value="roboto">Roboto</option>
-                <option value="robotomono">Roboto Mono</option>
-              </select>
-            </div>
-
+          <nav role="menubar" style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
             {/* Page navigation buttons */}
             <button
+              role="menuitem"
               type="button"
               aria-label="Previous page"
               onClick={() => controlsRef.current?.prev()}
-              disabled={!bytes}
+              disabled={!bytes || (settings.flow || 'paginated') === 'scrolled-doc'}
               title="Previous (←)"
             >
               ◀ Prev
             </button>
             <button
+              role="menuitem"
               type="button"
               aria-label="Next page"
               onClick={() => controlsRef.current?.next()}
-              disabled={!bytes}
+              disabled={!bytes || (settings.flow || 'paginated') === 'scrolled-doc'}
               title="Next (→)"
             >
               Next ▶
             </button>
 
+            {/* Settings Menu */}
+            <div style={{ position: 'relative' }} ref={settingsMenuRef}>
+              <button
+                role="menuitem"
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={settingsOpen}
+                onClick={() => setSettingsOpen(o => !o)}
+              >
+                Settings
+              </button>
+              {settingsOpen && (
+                <div
+                  role="dialog"
+                  aria-label="View settings"
+                  style={{
+                    position: 'absolute', right: 0, top: 'calc(100% + 4px)',
+                    background: '#fff', border: '1px solid #ddd', borderRadius: 8,
+                    padding: 16, zIndex: 20, display: 'flex', flexDirection: 'column',
+                    gap: 16, width: 280,
+                  }}
+                >
+                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
+                    <span>Theme</span>
+                    <button onClick={() => setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}>
+                      {settings.theme === 'dark' ? 'Light' : 'Dark'}
+                    </button>
+                  </div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
+                    <span id="font-size-label">Font Size</span>
+                    <div role="group" aria-labelledby="font-size-label" style={{ display:'flex', gap:4, alignItems:'center' }}>
+                      <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.max(0.8, +(s.fontScale - 0.05).toFixed(2)) }))}>−</button>
+                      <span>{Math.round(settings.fontScale*100)}%</span>
+                      <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.min(1.6, +(s.fontScale + 0.05).toFixed(2)) }))}>+</button>
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
+                    <span id="line-height-label">Line Height</span>
+                    <div role="group" aria-labelledby="line-height-label" style={{ display:'flex', gap:4, alignItems:'center' }}>
+                      <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.max(1.2, +(s.lineHeight - 0.05).toFixed(2)) }))}>−</button>
+                      <span>{settings.lineHeight.toFixed(2)}</span>
+                      <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.min(2.0, +(s.lineHeight + 0.05).toFixed(2)) }))}>+</button>
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
+                    <label htmlFor="ff">Font Family</label>
+                    <select id="ff" value={settings.fontFamily} onChange={(e) => setSettings(s => ({ ...s, fontFamily: e.target.value as any }))} style={{ padding:'6px 8px', border:'1px solid #e5e7eb', borderRadius:6 }}>
+                      <option value="os">OS Default</option>
+                      <option value="sans">Sans (system)</option>
+                      <option value="serif">Serif</option>
+                      <option disabled>────────</option>
+                      <option value="opendyslexic">Open Dyslexic</option>
+                      <option value="atkinson">Atkinson Hyperlegible</option>
+                      <option value="roboto">Roboto</option>
+                      <option value="robotomono">Roboto Mono</option>
+                    </select>
+                  </div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
+                    <label htmlFor="flow">Render Mode</label>
+                    <select
+                      id="flow"
+                      value={settings.flow || 'paginated'}
+                      onChange={(e) => setSettings(s => ({ ...s, flow: e.target.value as any }))}
+                      style={{ padding:'6px 8px', border:'1px solid #e5e7eb', borderRadius:6 }}>
+                      <option value="paginated">Paginated</option>
+                      <option value="scrolled-doc">Scrolled</option>
+                    </select>
+                  </div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
+                    <span>Focus Mode</span>
+                    <button type="button" onClick={() => { setFocusMode(true); setSettingsOpen(false); }} disabled={!bytes}>
+                      Enable
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Sign in */}
             {!token && (
-              <button onClick={request} disabled={!ready} style={{ padding:'6px 10px' }}>
+              <button role="menuitem" onClick={request} disabled={!ready} style={{ padding:'6px 10px' }}>
                 Sign in with Google
               </button>
             )}
-          </div>
+          </nav>
 
 
           <div style={{ display:'flex', gap:8, alignItems:'center', minWidth:140, justifyContent:'flex-end' }}>
-            <span style={{ color:'#6b7280' }}>
-              {page && total ? `Page ${page} / ${total}` : '—'}
-            </span>
+            {(settings.flow || 'paginated') === 'paginated' && (
+              <span style={{ color:'#6b7280' }}>
+                {page && total ? `Page ${page} / ${total}` : '—'}
+              </span>
+            )}
             <span style={{ color:'#6b7280' }}>
               {percent !== null ? `${percent}%` : ''}
             </span>
@@ -199,7 +256,10 @@ export default function Home() {
             {!token && <p>Sign in to list files.</p>}
             {error && <p style={{ color:'#b00' }}>{error}</p>}
             {files.map(f => (
-              <button key={f.id} onClick={() => openFile(f.id)}
+              <button
+                key={f.id}
+                onClick={() => openFile(f.id)}
+                disabled={loading}
                 style={{ display:'block', width:'100%', textAlign:'left', padding:'6px 8px', borderRadius:6, border:'1px solid #eee', marginBottom:6 }}>
                 {f.name}
               </button>
@@ -224,7 +284,11 @@ export default function Home() {
         <main style={{ border:'1px solid #ddd', borderRadius:8, height:'100%', overflow:'hidden',
           position:'relative',
           background: settings.theme === 'dark' ? '#0b0f12' : '#fff' }}>
-          {bytes ? (
+          {loading ? (
+            <div style={{ height:'100%', display:'grid', placeItems:'center', color:'#888' }}>
+              Loading book...
+            </div>
+          ) : bytes ? (
             <>
               <Reader
                 bytes={bytes}
@@ -233,6 +297,7 @@ export default function Home() {
                 fontScale={settings.fontScale}
                 lineHeight={settings.lineHeight}
                 fontFamily={settings.fontFamily}
+                flow={settings.flow || 'paginated'}
                 onRelocate={(loc: any) => {
                   const newCfi: string | undefined = loc?.start?.cfi;
                   if (newCfi) {
@@ -252,10 +317,8 @@ export default function Home() {
                 onReady={(c) => { controlsRef.current = c; }}
               />
               <div style={{ position:'absolute', bottom:10, right:10, display:'flex', gap:8 }}>
-                <button onClick={() => controlsRef.current?.prev()}>◀ Prev</button>
-                <button onClick={() => controlsRef.current?.next()}>Next ▶</button>
                 {focusMode && (
-                  <button onClick={() => setFocusMode(false)}>Exit Focus</button>
+                  <button onClick={() => setFocusMode(false)} title="Exit focus mode (Esc)">Exit Focus</button>
                 )}
               </div>
             </>

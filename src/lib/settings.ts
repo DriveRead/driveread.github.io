@@ -9,11 +9,14 @@ export type FontFamily =
   | 'roboto'
   | 'robotomono';
 
+export type Flow = 'paginated' | 'scrolled-doc';
+
 export type Settings = {
   theme: Theme;
   fontScale: number;
   lineHeight: number;
-  fontFamily: FontFamily;     // NEW
+  fontFamily: FontFamily;
+  flow?: Flow;
 };
 
 const KEY = 'driveread.settings.v1';
@@ -23,7 +26,7 @@ export function loadSettings(): Settings {
     const raw = localStorage.getItem(KEY);
     if (raw) return JSON.parse(raw);
   } catch {}
-  return { theme: 'light', fontScale: 1.0, lineHeight: 1.5, fontFamily: 'os' };
+  return { theme: 'light', fontScale: 1.0, lineHeight: 1.5, fontFamily: 'os', flow: 'paginated' };
 }
 
 export function saveSettings(s: Settings) {

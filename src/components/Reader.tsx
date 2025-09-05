@@ -1,6 +1,6 @@
 import ePub from 'epubjs';
 import { useEffect, useRef } from 'react';
-import type { Theme, FontFamily } from '@/src/lib/settings';
+import type { Theme, FontFamily, Flow } from '@/src/lib/settings';
 
 type Controls = {
   goTo: (hrefOrCfi: string) => Promise<void>;
@@ -18,6 +18,7 @@ export default function Reader({
   fontScale = 1.0,
   lineHeight = 1.5,
   fontFamily = 'os',
+  flow = 'paginated',
 }: {
   bytes: ArrayBuffer;
   startCfi?: string;
@@ -28,6 +29,7 @@ export default function Reader({
   fontScale?: number;
   lineHeight?: number;
   fontFamily?: FontFamily;
+  flow?: Flow;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<any>(null);
@@ -41,7 +43,7 @@ export default function Reader({
     const rendition = book.renderTo(containerRef.current!, {
       width: '100%',
       height: '100%',
-      flow: 'paginated',
+      flow,
       spread: 'auto',
     });
     renditionRef.current = rendition;
@@ -99,6 +101,13 @@ export default function Reader({
     };
   }, [bytes]);
 
+  // Apply flow
+  useEffect(() => {
+    const r = renditionRef.current;
+    if (!r) return;
+    r.flow(flow);
+  }, [flow]);
+
   // Apply theme / typography / font family
   useEffect(() => {
     const r = renditionRef.current;
@@ -122,19 +131,23 @@ export default function Reader({
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* Click zones for paging */}
-      <div
-        onClick={() => renditionRef.current?.prev()}
-        style={{ position: 'absolute', inset: '0 80% 0 0', cursor: 'w-resize' }}
-        aria-hidden
-        title="Previous page"
-      />
-      <div
-        onClick={() => renditionRef.current?.next()}
-        style={{ position: 'absolute', inset: '0 0 0 80%', cursor: 'e-resize' }}
-        aria-hidden
-        title="Next page"
-      />
+      {flow === 'paginated' && (
+        <>
+          {/* Click zones for paging */}
+          <div
+            onClick={() => renditionRef.current?.prev()}
+            style={{ position: 'absolute', inset: '0 80% 0 0', cursor: 'w-resize' }}
+            aria-hidden
+            title="Previous page"
+          />
+          <div
+            onClick={() => renditionRef.current?.next()}
+            style={{ position: 'absolute', inset: '0 0 0 80%', cursor: 'e-resize' }}
+            aria-hidden
+            title="Next page"
+          />
+        </>
+      )}
     </div>
   );
 }
