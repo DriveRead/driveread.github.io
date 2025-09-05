@@ -47,6 +47,7 @@ export default function Reader({
       height: '100%',
       flow,
       spread: 'auto',
+      allowScriptedContent: true,
     });
     renditionRef.current = rendition;
 
