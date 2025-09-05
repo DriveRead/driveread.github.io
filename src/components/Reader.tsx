@@ -77,7 +77,7 @@ export default function Reader({
     });
 
     // Arrow keys inside iframe
-    const onRendered = (section: any) => {
+    const onRendered = (section: any, view: any) => {
       const doc: Document | undefined = section.document;
       if (!doc) return;
       const handler = (e: KeyboardEvent) => {
@@ -86,7 +86,7 @@ export default function Reader({
         if (e.key === 'ArrowLeft')  { e.preventDefault(); renditionRef.current.prev(); }
       };
       doc.addEventListener('keydown', handler);
-      section.on('unloaded', () => doc.removeEventListener('keydown', handler));
+      view.on('detached', () => doc.removeEventListener('keydown', handler));
     };
     rendition.on('rendered', onRendered);
 
