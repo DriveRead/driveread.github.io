@@ -34,11 +34,13 @@ export default function Reader({
   const containerRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<any>(null);
   const bookRef = useRef<any>(null);
+  const isFirstLayoutEffect = useRef(true);
 
   // Initialise book + rendition
   useEffect(() => {
     const book = ePub(bytes);
     bookRef.current = book;
+    isFirstLayoutEffect.current = true; // Reset for new book
 
     const rendition = book.renderTo(containerRef.current!, {
       width: '100%',
@@ -108,12 +110,18 @@ export default function Reader({
     r.flow(flow);
   }, [flow]);
 
-  // Apply theme / typography / font family
+  // Apply theme
+  useEffect(() => {
+    const r = renditionRef.current;
+    if (!r) return;
+    r.themes.select(theme);
+  }, [theme]);
+
+  // Apply typography / font family and re-render if needed
   useEffect(() => {
     const r = renditionRef.current;
     if (!r) return;
 
-    r.themes.select(theme);
     r.themes.fontSize(`${Math.round(fontScale * 100)}%`);
     r.themes.override('line-height', String(lineHeight));
 
@@ -127,7 +135,13 @@ export default function Reader({
       : 'Roboto Mono, ui-monospace, monospace'; // robotomono
 
     r.themes.override('font-family', cssFamily);
-  }, [theme, fontScale, lineHeight, fontFamily]);
+
+    if (isFirstLayoutEffect.current) {
+      isFirstLayoutEffect.current = false;
+    } else if (r.location) {
+      r.display(r.location.start.cfi);
+    }
+  }, [fontScale, lineHeight, fontFamily]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>

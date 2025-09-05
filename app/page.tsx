@@ -1,14 +1,21 @@
 'use client';
 import Script from 'next/script';
-import { useEffect, useRef, useState } from 'react';
+import { useMemo, useEffect, useRef, useState } from 'react';
 import { useGoogleToken } from '@/src/hooks/useGoogleToken';
-import { listEpubs, downloadArrayBuffer } from '@/src/lib/drive';
-import { loadProgress, saveProgress } from '@/src/lib/progress';
+import { listEpubs, downloadArrayBuffer, loadRemoteProgress, saveRemoteProgress } from '@/src/lib/drive';
 import { loadSettings, saveSettings } from '@/src/lib/settings';
+import { loadAllLocalProgress, saveAllLocalProgress, mergeProgress, type Progress } from '@/src/lib/progress';
 import type { Settings } from '@/src/lib/settings';
 import Reader from '@/src/components/Reader';
 
-type DriveFile = { id: string; name: string };
+type DriveFile = {
+  id: string;
+  name: string;
+  path: string;
+  modifiedTime: string;
+  size: string;
+  iconLink: string;
+};
 type Controls = { goTo: (t: string) => Promise<void>; next: () => Promise<void>; prev: () => Promise<void> };
 
 export default function Home() {
@@ -26,6 +33,9 @@ export default function Home() {
   const [focusMode, setFocusMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<Progress>({});
+  const [sortBy, setSortBy] = useState<'modifiedTime' | 'name'>('modifiedTime');
+  const [filter, setFilter] = useState('');
 
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<Controls | null>(null);
@@ -33,8 +43,28 @@ export default function Home() {
 
   function debouncedSave(fid: string, newCfi: string) {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => saveProgress(fid, newCfi), 400);
+    saveTimer.current = window.setTimeout(() => {
+      const newProgress = { ...progress, [fid]: { cfi: newCfi, updated: Date.now() } };
+      setProgress(newProgress);
+      saveAllLocalProgress(newProgress);
+      if (token) {
+        saveRemoteProgress(token, newProgress).catch(e => console.error("Failed to save remote progress", e));
+      }
+    }, 1000);
   }
+
+  const sortedAndFilteredFiles = useMemo(() => {
+    if (!files) return [];
+    const filtered = files.filter(f => f.name.toLowerCase().includes(filter.toLowerCase()));
+    filtered.sort((a, b) => {
+      if (sortBy === 'name') {
+        return a.name.localeCompare(b.name);
+      }
+      // modifiedTime
+      return new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime();
+    });
+    return filtered;
+  }, [files, sortBy, filter]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -48,6 +78,31 @@ export default function Home() {
 
   useEffect(() => {
     if (!token) return;
+
+    async function syncProgress(token: string) {
+      try {
+        const local = loadAllLocalProgress();
+        const remote = await loadRemoteProgress(token);
+        if (remote) {
+          const merged = mergeProgress(local, remote);
+          setProgress(merged);
+          // Save merged back to local and remote to keep them in sync
+          saveAllLocalProgress(merged);
+          await saveRemoteProgress(token, merged);
+        } else {
+          setProgress(local);
+          // if remote doesn't exist, upload local
+          if (Object.keys(local).length > 0) {
+            await saveRemoteProgress(token, local);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to sync progress", e);
+        setProgress(loadAllLocalProgress());
+      }
+    }
+
+    syncProgress(token);
     listEpubs(token).then(d => setFiles(d.files)).catch(e => setError(String(e)));
   }, [token]);
   
@@ -66,7 +121,7 @@ export default function Home() {
       const buf = await downloadArrayBuffer(token, id);
       setFileId(id);
       setBytes(buf);
-      setCfi(loadProgress(id));
+      setCfi(progress[id]?.cfi);
     } catch (e: any) {
       setError(String(e));
     } finally {
@@ -76,13 +131,6 @@ export default function Home() {
 
   // persist settings when changed
   useEffect(() => { saveSettings(settings); }, [settings]);
-
-  // save on tab close
-  useEffect(() => {
-    function onBeforeUnload() { if (fileId && cfi) saveProgress(fileId, cfi); }
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [fileId, cfi]);
 
   // keyboard shortcuts
   useEffect(() => {
@@ -109,6 +157,19 @@ export default function Home() {
 
   return (
     <>
+      <style jsx>{`
+        .file-button:hover {
+          background-color: #f0f0f0;
+          border-color: #ddd;
+        }
+        .file-button[data-active="true"] {
+          background-color: #e0e8f0;
+          border-color: #c0d0e0;
+        }
+        .file-button:disabled {
+          opacity: 0.6;
+        }
+      `}</style>
       <Script src="https://accounts.google.com/gsi/client" async defer />
 
       {!focusMode && (
@@ -251,19 +312,49 @@ export default function Home() {
       >
         {/* Library */}
          {!focusMode && (
-          <aside style={{ overflow:'auto', border:'1px solid #ddd', borderRadius:8, padding:8 }}>
-            <h3 style={{ marginTop:0 }}>Your Drive EPUBs</h3>
+          <aside style={{ overflow:'hidden', border:'1px solid #ddd', borderRadius:8, padding:8, display: 'flex', flexDirection: 'column' }}>
+            <h3 style={{ marginTop:0, paddingBottom: 8, borderBottom: '1px solid #eee' }}>Your Drive EPUBs</h3>
+
+            <div style={{ display: 'flex', gap: 8, padding: '8px 0', borderBottom: '1px solid #eee', flexShrink: 0 }}>
+              <input
+                type="text"
+                placeholder="Filter by name..."
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                style={{ flexGrow: 1, padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6 }}
+              />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                style={{ padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6 }}
+              >
+                <option value="modifiedTime">Sort by Date</option>
+                <option value="name">Sort by Name</option>
+              </select>
+            </div>
+
             {!token && <p>Sign in to list files.</p>}
             {error && <p style={{ color:'#b00' }}>{error}</p>}
-            {files.map(f => (
-              <button
-                key={f.id}
-                onClick={() => openFile(f.id)}
-                disabled={loading}
-                style={{ display:'block', width:'100%', textAlign:'left', padding:'6px 8px', borderRadius:6, border:'1px solid #eee', marginBottom:6 }}>
-                {f.name}
-              </button>
-            ))}
+            <div style={{ overflowY: 'auto', flexGrow: 1, paddingTop: 8 }}>
+              {sortedAndFilteredFiles.map(f => (
+                <button
+                  key={f.id}
+                  className="file-button"
+                  data-active={f.id === fileId}
+                  onClick={() => openFile(f.id)}
+                  disabled={loading}
+                  style={{ display:'flex', alignItems: 'center', gap: 8, width:'100%', textAlign:'left', padding:'6px 8px', borderRadius:6, border:'1px solid transparent', marginBottom:2, cursor: 'pointer' }}>
+                  <img src={f.iconLink} alt="epub icon" width={16} height={16} />
+                  <div style={{ flexGrow: 1, overflow: 'hidden' }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
+                    <div style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'  }} title={f.path}>{f.path || '/'}</div>
+                    <div style={{ fontSize: 12, color: '#888' }}>
+                      {new Date(f.modifiedTime).toLocaleDateString()} - {f.size ? `${Math.round(parseInt(f.size) / 1024)} KB` : ''}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
           </aside>
         )}
         {/* TOC */}
