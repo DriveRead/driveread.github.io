@@ -39,9 +39,14 @@ export async function listEpubs(token: string) {
   );
 
   function getPath(folderId?: string): string {
-    if (!folderId || !folders.has(folderId)) return '';
-    const folder = folders.get(folderId)!;
-    return getPath(folder.parent) + '/' + folder.name;
+    const pathParts: string[] = [];
+    let currentFolderId = folderId;
+    while (currentFolderId && folders.has(currentFolderId)) {
+      const folder = folders.get(currentFolderId)!;
+      pathParts.unshift(folder.name);
+      currentFolderId = folder.parent;
+    }
+    return pathParts.length > 0 ? '/' + pathParts.join('/') : '';
   }
 
   const filesWithPaths = epubData.files.map((f) => ({

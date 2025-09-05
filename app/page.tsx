@@ -354,7 +354,7 @@ export default function Home() {
                     <div style={{ fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
                     <div style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'  }} title={f.path}>{f.path || '/'}</div>
                     <div style={{ fontSize: 12, color: '#888' }}>
-                      {new Date(f.modifiedTime).toLocaleDateString()} - {f.size ? `${Math.round(parseInt(f.size) / 1024)} KB` : ''}
+                      {new Date(f.modifiedTime).toISOString().slice(0, 10)} - {f.size ? `${Math.round(parseInt(f.size) / 1024)} KB` : ''}
                     </div>
                   </div>
                 </button>
