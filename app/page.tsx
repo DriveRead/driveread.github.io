@@ -8,6 +8,8 @@ import { loadAllLocalProgress, saveAllLocalProgress, mergeProgress, type Progres
 import type { Settings } from '@/src/lib/settings';
 import Reader from '@/src/components/Reader';
 
+const isDebug = typeof window !== 'undefined' && window.location.search.includes('debug=true');
+
 type DriveFile = {
   id: string;
   name: string;
@@ -102,8 +104,18 @@ export default function Home() {
       }
     }
 
+    if (isDebug) console.log('page.tsx: Calling syncProgress with token.');
     syncProgress(token);
-    listEpubs(token).then(d => setFiles(d.files)).catch(e => setError(String(e)));
+    if (isDebug) console.log('page.tsx: Calling listEpubs with token.');
+    listEpubs(token)
+      .then(d => {
+        if (isDebug) console.log('page.tsx: listEpubs successful, received files:', d.files);
+        setFiles(d.files);
+      })
+      .catch(e => {
+        if (isDebug) console.error('page.tsx: listEpubs failed:', e);
+        setError(String(e));
+      });
   }, [token]);
 
   useEffect(() => {
@@ -113,6 +125,7 @@ export default function Home() {
   
   async function openFile(id: string) {
     if (!token) return;
+    if (isDebug) console.log(`page.tsx: Opening file with id: ${id}`);
     setLoading(true);
     setBytes(null);
     setFileId(null);
@@ -124,12 +137,15 @@ export default function Home() {
     setError(null);
     try {
       const buf = await downloadArrayBuffer(token, id);
+      if (isDebug) console.log(`page.tsx: File ${id} downloaded, buffer size: ${buf.byteLength}`);
       setFileId(id);
       setBytes(buf);
       setCfi(progress[id]?.cfi);
     } catch (e: any) {
+      if (isDebug) console.error(`page.tsx: Error opening file ${id}:`, e);
       setError(String(e));
     } finally {
+      if (isDebug) console.log(`page.tsx: Finished opening file ${id}`);
       setLoading(false);
     }
   }
