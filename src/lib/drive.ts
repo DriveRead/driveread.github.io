@@ -26,7 +26,7 @@ const isDebug = typeof window !== 'undefined' && window.location.search.includes
 
 export async function listEpubs(token: string) {
   if (isDebug) console.log('listEpubs: fetching epubs...');
-  const epubRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=mimeType='application/epub+zip' and trashed=false&fields=files(id,name,modifiedTime,parents,size,iconLink)&pageSize=1000&orderBy=modifiedTime desc`, {
+  const epubRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=fileExtension='epub' and trashed=false&fields=files(id,name,modifiedTime,parents,size,iconLink)&pageSize=1000&orderBy=modifiedTime desc`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (!epubRes.ok) throw new Error(await epubRes.text());
