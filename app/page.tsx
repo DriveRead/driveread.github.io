@@ -26,6 +26,7 @@ export default function Home() {
   const [bytes, setBytes] = useState<ArrayBuffer | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
   const [cfi, setCfi] = useState<string | undefined>();
+  const [currentHref, setCurrentHref] = useState<string | null>(null);
   const [toc, setToc] = useState<Array<{ href: string; label: string }>>([]);
   const [settings, setSettings] = useState<Settings>({ theme: 'light', fontScale: 1.0, lineHeight: 1.5, fontFamily: 'os' });
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +43,24 @@ export default function Home() {
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<Controls | null>(null);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
+
+  function goToPrevChapter() {
+    if (!currentHref || toc.length === 0) return;
+    const base = (h: string) => h.split('#')[0];
+    const idx = toc.findIndex(i => base(i.href) === base(currentHref));
+    if (idx > 0) {
+      controlsRef.current?.goTo(toc[idx - 1].href);
+    }
+  }
+
+  function goToNextChapter() {
+    if (!currentHref || toc.length === 0) return;
+    const base = (h: string) => h.split('#')[0];
+    const idx = toc.findIndex(i => base(i.href) === base(currentHref));
+    if (idx !== -1 && idx + 1 < toc.length) {
+      controlsRef.current?.goTo(toc[idx + 1].href);
+    }
+  }
 
   function debouncedSave(fid: string, newCfi: string) {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -221,6 +240,28 @@ export default function Home() {
               title="Next (→)"
             >
               Next ▶
+            </button>
+
+            {/* Chapter navigation buttons (work in all modes) */}
+            <button
+              role="menuitem"
+              type="button"
+              aria-label="Previous chapter"
+              onClick={goToPrevChapter}
+              disabled={!bytes || toc.length === 0 || !currentHref}
+              title="Previous chapter"
+            >
+              Prev Chapter
+            </button>
+            <button
+              role="menuitem"
+              type="button"
+              aria-label="Next chapter"
+              onClick={goToNextChapter}
+              disabled={!bytes || toc.length === 0 || !currentHref}
+              title="Next chapter"
+            >
+              Next Chapter
             </button>
 
             {/* Settings Menu */}
@@ -416,6 +457,8 @@ export default function Home() {
                     setCfi(newCfi);
                     if (fileId) debouncedSave(fileId, newCfi);
                   }
+                  const newHref: string | undefined = loc?.start?.href;
+                  setCurrentHref(newHref || null);
                   const p = loc?.start?.displayed?.page ?? null;
                   const t = loc?.start?.displayed?.total ?? null;
                   const pct = (typeof loc?.percentage === 'number')
@@ -430,7 +473,11 @@ export default function Home() {
               />
               <div style={{ position:'absolute', bottom:10, right:10, display:'flex', gap:8 }}>
                 {focusMode && (
-                  <button onClick={() => setFocusMode(false)} title="Exit focus mode (Esc)">Exit Focus</button>
+                  <>
+                    <button onClick={goToPrevChapter} disabled={!bytes || toc.length === 0 || !currentHref} title="Previous chapter">Prev Chapter</button>
+                    <button onClick={goToNextChapter} disabled={!bytes || toc.length === 0 || !currentHref} title="Next chapter">Next Chapter</button>
+                    <button onClick={() => setFocusMode(false)} title="Exit focus mode (Esc)">Exit Focus</button>
+                  </>
                 )}
               </div>
             </>
