@@ -6,18 +6,21 @@ import { downloadEpub, DriveError, loadRemoteProgress, saveRemoteProgress, type 
 import { parseDriveLaunchState, type DriveLaunchState } from '@/src/lib/driveLaunch';
 import { launchLifecycleReducer, type LaunchErrorKind, type LaunchLifecycle } from '@/src/lib/launchLifecycle';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '@/src/lib/settings';
-import { loadAllLocalProgress, saveAllLocalProgress, mergeProgress, type Progress } from '@/src/lib/progress';
+import { addBookmark, loadAllLocalProgress, saveAllLocalProgress, mergeProgress, removeBookmark, READING_RECORD_VERSION, type Progress } from '@/src/lib/progress';
+import { adjacentChapter, flattenToc, isEditableTarget } from '@/src/lib/readerNavigation';
 import type { Settings } from '@/src/lib/settings';
-import Reader from '@/src/components/Reader';
+import Reader, { type ReaderControls } from '@/src/components/Reader';
 import SettingsPanel from '@/src/components/settings/SettingsPanel';
 import AppShell from '@/src/components/AppShell';
 import LaunchScreen from '@/src/components/LaunchScreen';
 import ReaderToolbar from '@/src/components/ReaderToolbar';
 import ContentsPanel from '@/src/components/ContentsPanel';
+import type { TocItem } from '@/src/components/ContentsPanel';
+import { BookmarksDialog, ShortcutsDialog } from '@/src/components/ReaderDialogs';
 
 const isDebug = typeof window !== 'undefined' && window.location.search.includes('debug=true');
 
-type Controls = { goTo: (t: string) => Promise<void>; next: () => Promise<void>; prev: () => Promise<void> };
+type SyncState = 'local' | 'syncing' | 'synced' | 'failed';
 
 export default function Home() {
   const auth = useGoogleToken();
@@ -26,53 +29,71 @@ export default function Home() {
   const [fileId, setFileId] = useState<string | null>(null);
   const [cfi, setCfi] = useState<string | undefined>();
   const [currentHref, setCurrentHref] = useState<string | null>(null);
-  const [toc, setToc] = useState<Array<{ href: string; label: string }>>([]);
+  const [toc, setToc] = useState<TocItem[]>([]);
   const [settings, setSettings] = useState<Settings>(() => ({ ...DEFAULT_SETTINGS }));
   const [page, setPage] = useState<number | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [percent, setPercent] = useState<number | null>(null);
+  const [locations, setLocations] = useState<number | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tocOpen, setTocOpen] = useState(false);
+  const [bookmarksOpen, setBookmarksOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>('local');
   const [progress, setProgress] = useState<Progress>({});
   const [launch, setLaunch] = useState<DriveLaunchState>({ status: 'missing' });
   const [lifecycle, dispatchLifecycle] = useReducer(launchLifecycleReducer, { status: 'no-launch' } as LaunchLifecycle);
   const [selectedFile, setSelectedFile] = useState<DriveFileMetadata | null>(null);
 
   const saveTimer = useRef<number | null>(null);
-  const controlsRef = useRef<Controls | null>(null);
+  const controlsRef = useRef<ReaderControls | null>(null);
+  const progressRef = useRef<Progress>({});
+  const pendingSync = useRef(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const contentsButtonRef = useRef<HTMLButtonElement>(null);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
 
+  useEffect(() => {
+    const local = loadAllLocalProgress();
+    progressRef.current = local;
+    setProgress(local);
+  }, []);
+
   function goToPrevChapter() {
-    if (!currentHref || toc.length === 0) return;
-    const base = (h: string) => h.split('#')[0];
-    const idx = toc.findIndex(i => base(i.href) === base(currentHref));
-    if (idx > 0) {
-      controlsRef.current?.goTo(toc[idx - 1].href);
-    }
+    const target = adjacentChapter(toc, currentHref, -1);
+    if (target) controlsRef.current?.goTo(target.href);
   }
 
   function goToNextChapter() {
-    if (!currentHref || toc.length === 0) return;
-    const base = (h: string) => h.split('#')[0];
-    const idx = toc.findIndex(i => base(i.href) === base(currentHref));
-    if (idx !== -1 && idx + 1 < toc.length) {
-      controlsRef.current?.goTo(toc[idx + 1].href);
-    }
+    const target = adjacentChapter(toc, currentHref, 1);
+    if (target) controlsRef.current?.goTo(target.href);
   }
 
-  function debouncedSave(fid: string, newCfi: string) {
+  function persistProgress(next: Progress) {
+    progressRef.current = next;
+    setProgress(next);
+    saveAllLocalProgress(next);
+    pendingSync.current = true;
+    setSyncState(token ? 'syncing' : 'local');
+    if (token) saveRemoteProgress(token, next).then(() => { pendingSync.current = false; setSyncState('synced'); }).catch(() => setSyncState('failed'));
+  }
+
+  function debouncedSave(fid: string, newCfi: string, newPercentage: number | null) {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      const newProgress = { ...progress, [fid]: { cfi: newCfi, updated: Date.now() } };
-      setProgress(newProgress);
-      saveAllLocalProgress(newProgress);
-      if (token) {
-        saveRemoteProgress(token, newProgress).catch(e => console.error("Failed to save remote progress", e));
-      }
+      const old = progressRef.current[fid];
+      const newProgress: Progress = { ...progressRef.current, [fid]: { version: READING_RECORD_VERSION, cfi: newCfi, updated: Date.now(), ...(newPercentage !== null ? { percentage: newPercentage / 100 } : {}), bookmarks: old?.bookmarks || [], metadata: { ...old?.metadata, fileName: selectedFile?.name } } };
+      persistProgress(newProgress);
     }, 1000);
+  }
+
+  function toggleBookmark() {
+    if (!fileId || !cfi) return;
+    const record = progressRef.current[fileId] || { version: READING_RECORD_VERSION, cfi, updated: Date.now(), bookmarks: [] };
+    const exists = record.bookmarks.some(bookmark => bookmark.cfi === cfi);
+    const nextRecord = exists ? removeBookmark(record, cfi) : addBookmark(record, { cfi, created: Date.now(), label: currentChapter || undefined });
+    persistProgress({ ...progressRef.current, [fileId]: nextRecord });
   }
 
   // Handle files launched from Google Drive via "Open with DriveRead".
@@ -117,11 +138,14 @@ useEffect(() => {
         if (remote) {
           const merged = mergeProgress(local, remote);
           setProgress(merged);
+          progressRef.current = merged;
           // Save merged back to local and remote to keep them in sync
           saveAllLocalProgress(merged);
           await saveRemoteProgress(token, merged);
+          setSyncState('synced');
         } else {
           setProgress(local);
+          progressRef.current = local;
           // if remote doesn't exist, upload local
           if (Object.keys(local).length > 0) {
             await saveRemoteProgress(token, local);
@@ -129,12 +153,23 @@ useEffect(() => {
         }
       } catch (e) {
         console.error("Failed to sync progress", e);
-        setProgress(loadAllLocalProgress());
+        const local = loadAllLocalProgress();
+        setProgress(local); progressRef.current = local; pendingSync.current = true; setSyncState('failed');
       }
     }
 
     if (isDebug) console.log('page.tsx: Calling syncProgress with token.');
     syncProgress(token);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    const retry = window.setInterval(() => {
+      if (!pendingSync.current || document.visibilityState === 'hidden') return;
+      setSyncState('syncing');
+      saveRemoteProgress(token, progressRef.current).then(() => { pendingSync.current = false; setSyncState('synced'); }).catch(() => setSyncState('failed'));
+    }, 15000);
+    return () => window.clearInterval(retry);
   }, [token]);
 
   useEffect(() => {
@@ -154,6 +189,7 @@ useEffect(() => {
     setPage(null);
     setTotal(null);
     setPercent(null);
+    setLocations(null);
     try {
       const { metadata, buffer } = await downloadEpub(token, id, metadata => {
         setSelectedFile(metadata);
@@ -198,12 +234,26 @@ useEffect(() => {
   // persist settings when changed
   useEffect(() => { if (settingsHydrated) saveSettings(settings); }, [settings, settingsHydrated]);
 
+  const currentChapter = currentHref ? flattenToc(toc).find(item => item.href.split('#')[0] === currentHref.split('#')[0])?.label : undefined;
+  const currentBookmarks = fileId ? progress[fileId]?.bookmarks || [] : [];
+  const bookmarked = Boolean(cfi && currentBookmarks.some(bookmark => bookmark.cfi === cfi));
+  const syncLabel = syncState === 'local' ? 'Saved locally' : syncState === 'syncing' ? 'Syncing…' : syncState === 'synced' ? 'Synced' : 'Sync failed · saved locally';
+
   // keyboard shortcuts
+  // Handler intentionally follows live reader state so chapter/bookmark shortcuts stay current.
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (isEditableTarget(e.target)) return;
+      if (e.key === 'Escape') { setHelpOpen(false); setBookmarksOpen(false); setTocOpen(false); setSettingsOpen(false); setFocusMode(false); return; }
+      if (e.key === '?') { e.preventDefault(); setHelpOpen(true); return; }
       if (!controlsRef.current) return;
-      if (e.key === 'ArrowRight') { e.preventDefault(); controlsRef.current.next(); }
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); controlsRef.current.prev(); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); e.shiftKey ? goToNextChapter() : controlsRef.current.next(); }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); e.shiftKey ? goToPrevChapter() : controlsRef.current.prev(); }
+      if (e.key.toLowerCase() === 'c') { e.preventDefault(); setTocOpen(true); }
+      if (e.key.toLowerCase() === 's') { e.preventDefault(); setSettingsOpen(true); }
+      if (e.key.toLowerCase() === 'b') { e.preventDefault(); toggleBookmark(); }
+      if (e.key.toLowerCase() === 'f') { e.preventDefault(); setFocusMode(value => !value); }
       if (e.key === '+' || e.key === '=') {
         e.preventDefault(); setSettings(s => ({ ...s, fontSize: Math.min(200, s.fontSize + 5) }));
       }
@@ -213,22 +263,18 @@ useEffect(() => {
       if (e.key.toLowerCase() === 'd') { // toggle dark
         e.preventDefault(); setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }));
       }
-      if (e.key === 'Escape' && focusMode) {
-        setFocusMode(false);
-      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [focusMode]);
-
-  const currentChapter = currentHref ? toc.find(item => item.href.split('#')[0] === currentHref.split('#')[0])?.label : undefined;
+  }, [focusMode, currentHref, toc, cfi, fileId, currentChapter, token]);
+  /* eslint-enable react-hooks/exhaustive-deps */
   const loading = ['requesting-access', 'fetching-metadata', 'downloading'].includes(lifecycle.status);
 
   return (
     <AppShell theme={settings.theme}>
       <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={auth.scriptLoaded} onError={auth.scriptFailed} />
       {!focusMode && (
-        <ReaderToolbar bookTitle={selectedFile?.name} chapterTitle={currentChapter} hasBook={Boolean(bytes)} paginated={settings.flow === 'paginated'} page={page} total={total} percent={percent} tocOpen={tocOpen} settingsOpen={settingsOpen} onContents={() => setTocOpen(true)} onSettings={() => setSettingsOpen(true)} onPrev={() => controlsRef.current?.prev()} onNext={() => controlsRef.current?.next()} onFocus={() => setFocusMode(true)} settingsButtonRef={settingsButtonRef} contentsButtonRef={contentsButtonRef} />
+        <ReaderToolbar bookTitle={selectedFile?.name} chapterTitle={currentChapter} hasBook={Boolean(bytes)} page={page} total={total} locations={locations} percent={percent} tocOpen={tocOpen} settingsOpen={settingsOpen} bookmarked={bookmarked} syncLabel={syncLabel} onContents={() => setTocOpen(true)} onSettings={() => setSettingsOpen(true)} onPrev={() => controlsRef.current?.prev()} onNext={() => controlsRef.current?.next()} onPrevChapter={goToPrevChapter} onNextChapter={goToNextChapter} onBookmark={toggleBookmark} onBookmarks={() => setBookmarksOpen(true)} onHelp={() => setHelpOpen(true)} onSeek={value => controlsRef.current?.goToPercentage(value / 100)} onFocus={() => setFocusMode(true)} settingsButtonRef={settingsButtonRef} contentsButtonRef={contentsButtonRef} />
       )}
       <div className={`reader-workspace${focusMode ? ' is-focus-mode' : ''}`}>
         <main className="reader-surface">
@@ -244,7 +290,6 @@ useEffect(() => {
                   const newCfi: string | undefined = loc?.start?.cfi;
                   if (newCfi) {
                     setCfi(newCfi);
-                    if (fileId) debouncedSave(fileId, newCfi);
                   }
                   const newHref: string | undefined = loc?.start?.href;
                   setCurrentHref(newHref || null);
@@ -256,9 +301,11 @@ useEffect(() => {
                   setPage(p);
                   setTotal(t);
                   setPercent(pct);
+                  setLocations(loc.totalLocations ?? null);
+                  if (newCfi && fileId) debouncedSave(fileId, newCfi, pct);
                 }}
                 onToc={setToc}
-                onReady={(c) => { controlsRef.current = c; }}
+                onReady={(controls) => { controlsRef.current = controls; controls.generateLocations().then(setLocations); }}
               />
               {focusMode && <nav className="focus-controls" aria-label="Distraction-free reading controls"><button onClick={goToPrevChapter} disabled={!currentHref} aria-label="Previous chapter">← <span>Chapter</span></button><div className="focus-progress"><strong>{currentChapter || selectedFile?.name}</strong><span>{percent !== null ? `${percent}%` : ''}</span></div><button onClick={goToNextChapter} disabled={!currentHref} aria-label="Next chapter"><span>Chapter</span> →</button><button className="exit-focus" onClick={() => setFocusMode(false)} title="Exit distraction-free mode (Escape)">Exit focus <span aria-hidden="true">×</span></button></nav>}
             </>
@@ -269,6 +316,8 @@ useEffect(() => {
       </div>
       <ContentsPanel open={tocOpen} items={toc} currentHref={currentHref} onSelect={href => controlsRef.current?.goTo(href)} onClose={() => setTocOpen(false)} returnFocusRef={contentsButtonRef} />
       <SettingsPanel open={settingsOpen} settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} canFocus={Boolean(bytes)} onFocusMode={() => { setFocusMode(true); setSettingsOpen(false); }} returnFocusRef={settingsButtonRef} />
+      <BookmarksDialog open={bookmarksOpen} bookmarks={currentBookmarks} onSelect={target => controlsRef.current?.goTo(target)} onRemove={target => { if (fileId && progressRef.current[fileId]) persistProgress({ ...progressRef.current, [fileId]: removeBookmark(progressRef.current[fileId], target) }); }} onRestart={() => controlsRef.current?.goToPercentage(0)} onClose={() => setBookmarksOpen(false)} />
+      <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </AppShell>
   );
 }

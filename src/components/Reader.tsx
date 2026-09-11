@@ -1,13 +1,17 @@
 import ePub from 'epubjs';
 import { useEffect, useRef } from 'react';
 import type { Settings } from '@/src/lib/settings';
+import type { TocItem } from './ContentsPanel';
+import { isEditableTarget } from '@/src/lib/readerNavigation';
 
-type Controls = {
+export type ReaderControls = {
   goTo: (hrefOrCfi: string) => Promise<void>;
+  goToPercentage: (percentage: number) => Promise<void>;
+  generateLocations: () => Promise<number>;
   next: () => Promise<void>;
   prev: () => Promise<void>;
 };
-export type ReaderLocation = { start?: { cfi?: string; href?: string; displayed?: { page?: number; total?: number } }; percentage?: number };
+export type ReaderLocation = { start?: { cfi?: string; href?: string; displayed?: { page?: number; total?: number } }; percentage?: number; location?: number; totalLocations?: number };
 
 export default function Reader({
   bytes,
@@ -20,8 +24,8 @@ export default function Reader({
   bytes: ArrayBuffer;
   startCfi?: string;
   onRelocate?: (loc: ReaderLocation) => void;
-  onToc?: (items: Array<{ href: string; label: string }>) => void;
-  onReady?: (controls: Controls) => void;
+  onToc?: (items: TocItem[]) => void;
+  onReady?: (controls: ReaderControls) => void;
   settings: Settings;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,11 +67,24 @@ export default function Reader({
     rendition.display(startCfi || undefined);
 
     // Relocation → bubble full 'loc'
-    rendition.on('relocated', (loc: any) => onRelocate?.(loc));
+    rendition.on('relocated', (loc: any) => {
+      const cfi = loc?.start?.cfi;
+      onRelocate?.({
+        ...loc,
+        percentage: typeof cfi === 'string' && book.locations?.length?.() ? book.locations.percentageFromCfi(cfi) : loc?.percentage,
+        location: typeof cfi === 'string' && book.locations?.length?.() ? book.locations.locationFromCfi(cfi) : undefined,
+        totalLocations: book.locations?.length?.() || undefined,
+      });
+    });
 
     // TOC
     book.loaded.navigation.then((nav: any) => {
-      const items = (nav?.toc || []).map((i: any) => ({ href: i.href, label: i.label }));
+      const mapItem = (i: any): TocItem => ({
+        href: i.href,
+        label: i.label,
+        children: (i.subitems || i.children || []).map(mapItem),
+      });
+      const items = (nav?.toc || []).map(mapItem);
       onToc?.(items);
     });
 
@@ -76,6 +93,7 @@ export default function Reader({
       const doc: Document | undefined = section.document;
       if (!doc) return;
       const handler = (e: KeyboardEvent) => {
+        if (isEditableTarget(e.target)) return;
         if (!renditionRef.current) return;
         if (e.key === 'ArrowRight') { e.preventDefault(); renditionRef.current.next(); }
         if (e.key === 'ArrowLeft')  { e.preventDefault(); renditionRef.current.prev(); }
@@ -88,6 +106,14 @@ export default function Reader({
     // Expose simple controls
     onReady?.({
       goTo: (tgt: string) => rendition.display(tgt),
+      goToPercentage: (percentage: number) => {
+        const cfi = book.locations.cfiFromPercentage(Math.max(0, Math.min(1, percentage)));
+        return cfi ? rendition.display(cfi) : Promise.resolve();
+      },
+      generateLocations: async () => {
+        if (!book.locations.length()) await book.locations.generate(1600);
+        return book.locations.length();
+      },
       next: () => rendition.next(),
       prev: () => rendition.prev(),
     });
