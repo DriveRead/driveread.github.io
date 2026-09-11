@@ -154,19 +154,19 @@ export default function Reader({
   }, [settings.fontSize, settings.lineHeight, settings.fontFamily, settings.contentWidth, settings.pageMargins, settings.paragraphSpacing, settings.textAlignment, settings.hyphenation, settings.reducedMotion]);
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div ref={containerRef} className="epub-reader">
       {settings.flow === 'paginated' && (
         <>
           {/* Click zones for paging */}
           <div
             onClick={() => renditionRef.current?.prev()}
-            style={{ position: 'absolute', inset: '0 80% 0 0', cursor: 'w-resize' }}
+            className="page-zone page-zone-previous"
             aria-hidden
             title="Previous page"
           />
           <div
             onClick={() => renditionRef.current?.next()}
-            style={{ position: 'absolute', inset: '0 0 0 80%', cursor: 'e-resize' }}
+            className="page-zone page-zone-next"
             aria-hidden
             title="Next page"
           />
