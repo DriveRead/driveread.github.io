@@ -5,10 +5,11 @@ import { useGoogleToken } from '@/src/hooks/useGoogleToken';
 import { downloadEpub, DriveError, loadRemoteProgress, saveRemoteProgress, type DriveFileMetadata } from '@/src/lib/drive';
 import { parseDriveLaunchState, type DriveLaunchState } from '@/src/lib/driveLaunch';
 import { launchLifecycleReducer, type LaunchErrorKind, type LaunchLifecycle } from '@/src/lib/launchLifecycle';
-import { loadSettings, saveSettings } from '@/src/lib/settings';
+import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '@/src/lib/settings';
 import { loadAllLocalProgress, saveAllLocalProgress, mergeProgress, type Progress } from '@/src/lib/progress';
 import type { Settings } from '@/src/lib/settings';
 import Reader from '@/src/components/Reader';
+import SettingsPanel from '@/src/components/settings/SettingsPanel';
 
 const isDebug = typeof window !== 'undefined' && window.location.search.includes('debug=true');
 
@@ -22,7 +23,7 @@ export default function Home() {
   const [cfi, setCfi] = useState<string | undefined>();
   const [currentHref, setCurrentHref] = useState<string | null>(null);
   const [toc, setToc] = useState<Array<{ href: string; label: string }>>([]);
-  const [settings, setSettings] = useState<Settings>({ theme: 'light', fontScale: 1.0, lineHeight: 1.5, fontFamily: 'os' });
+  const [settings, setSettings] = useState<Settings>(() => ({ ...DEFAULT_SETTINGS }));
   const [page, setPage] = useState<number | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [percent, setPercent] = useState<number | null>(null);
@@ -36,6 +37,7 @@ export default function Home() {
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<Controls | null>(null);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
+  const [settingsHydrated, setSettingsHydrated] = useState(false);
 
   function goToPrevChapter() {
     if (!currentHref || toc.length === 0) return;
@@ -142,6 +144,7 @@ useEffect(() => {
   useEffect(() => {
     // Load settings from localStorage on the client side only to avoid hydration mismatch
     setSettings(loadSettings());
+    setSettingsHydrated(true);
   }, []);
   
   async function openFile(id: string) {
@@ -197,7 +200,7 @@ useEffect(() => {
   }
   
   // persist settings when changed
-  useEffect(() => { saveSettings(settings); }, [settings]);
+  useEffect(() => { if (settingsHydrated) saveSettings(settings); }, [settings, settingsHydrated]);
 
   // keyboard shortcuts
   useEffect(() => {
@@ -206,10 +209,10 @@ useEffect(() => {
       if (e.key === 'ArrowRight') { e.preventDefault(); controlsRef.current.next(); }
       if (e.key === 'ArrowLeft')  { e.preventDefault(); controlsRef.current.prev(); }
       if (e.key === '+' || e.key === '=') {
-        e.preventDefault(); setSettings(s => ({ ...s, fontScale: Math.min(1.6, +(s.fontScale + 0.05).toFixed(2)) }));
+        e.preventDefault(); setSettings(s => ({ ...s, fontSize: Math.min(200, s.fontSize + 5) }));
       }
       if (e.key === '-') {
-        e.preventDefault(); setSettings(s => ({ ...s, fontScale: Math.max(0.8, +(s.fontScale - 0.05).toFixed(2)) }));
+        e.preventDefault(); setSettings(s => ({ ...s, fontSize: Math.max(75, s.fontSize - 5) }));
       }
       if (e.key.toLowerCase() === 'd') { // toggle dark
         e.preventDefault(); setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }));
@@ -223,7 +226,7 @@ useEffect(() => {
   }, [focusMode]);
 
   return (
-    <>
+    <div className={`app-shell theme-${settings.theme}`} data-theme={settings.theme}>
       <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={auth.scriptLoaded} onError={auth.scriptFailed} />
 
       {!focusMode && (
@@ -240,7 +243,7 @@ useEffect(() => {
               type="button"
               aria-label="Previous page"
               onClick={() => controlsRef.current?.prev()}
-              disabled={!bytes || (settings.flow || 'paginated') === 'scrolled-doc'}
+              disabled={!bytes || settings.flow === 'scrolled-doc'}
               title="Previous (←)"
             >
               ◀ Prev
@@ -250,7 +253,7 @@ useEffect(() => {
               type="button"
               aria-label="Next page"
               onClick={() => controlsRef.current?.next()}
-              disabled={!bytes || (settings.flow || 'paginated') === 'scrolled-doc'}
+              disabled={!bytes || settings.flow === 'scrolled-doc'}
               title="Next (→)"
             >
               Next ▶
@@ -289,78 +292,20 @@ useEffect(() => {
               >
                 Settings
               </button>
-              {settingsOpen && (
-                <div
-                  role="dialog"
-                  aria-label="View settings"
-                  style={{
-                    position: 'absolute', right: 0, top: 'calc(100% + 4px)',
-                    background: '#fff', border: '1px solid #ddd', borderRadius: 8,
-                    padding: 16, zIndex: 20, display: 'flex', flexDirection: 'column',
-                    gap: 16, width: 280,
-                  }}
-                >
-                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
-                    <span>Theme</span>
-                    <button onClick={() => setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}>
-                      {settings.theme === 'dark' ? 'Light' : 'Dark'}
-                    </button>
-                  </div>
-                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
-                    <span id="font-size-label">Font Size</span>
-                    <div role="group" aria-labelledby="font-size-label" style={{ display:'flex', gap:4, alignItems:'center' }}>
-                      <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.max(0.8, +(s.fontScale - 0.05).toFixed(2)) }))}>−</button>
-                      <span>{Math.round(settings.fontScale*100)}%</span>
-                      <button onClick={() => setSettings(s => ({ ...s, fontScale: Math.min(1.6, +(s.fontScale + 0.05).toFixed(2)) }))}>+</button>
-                    </div>
-                  </div>
-                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
-                    <span id="line-height-label">Line Height</span>
-                    <div role="group" aria-labelledby="line-height-label" style={{ display:'flex', gap:4, alignItems:'center' }}>
-                      <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.max(1.2, +(s.lineHeight - 0.05).toFixed(2)) }))}>−</button>
-                      <span>{settings.lineHeight.toFixed(2)}</span>
-                      <button onClick={() => setSettings(s => ({ ...s, lineHeight: Math.min(2.0, +(s.lineHeight + 0.05).toFixed(2)) }))}>+</button>
-                    </div>
-                  </div>
-                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
-                    <label htmlFor="ff">Font Family</label>
-                    <select id="ff" value={settings.fontFamily} onChange={(e) => setSettings(s => ({ ...s, fontFamily: e.target.value as any }))} style={{ padding:'6px 8px', border:'1px solid #e5e7eb', borderRadius:6 }}>
-                      <option value="os">OS Default</option>
-                      <option value="sans">Sans (system)</option>
-                      <option value="serif">Serif</option>
-                      <option disabled>────────</option>
-                      <option value="opendyslexic">Open Dyslexic</option>
-                      <option value="atkinson">Atkinson Hyperlegible</option>
-                      <option value="roboto">Roboto</option>
-                      <option value="robotomono">Roboto Mono</option>
-                    </select>
-                  </div>
-                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
-                    <label htmlFor="flow">Render Mode</label>
-                    <select
-                      id="flow"
-                      value={settings.flow || 'paginated'}
-                      onChange={(e) => setSettings(s => ({ ...s, flow: e.target.value as any }))}
-                      style={{ padding:'6px 8px', border:'1px solid #e5e7eb', borderRadius:6 }}>
-                      <option value="paginated">Paginated</option>
-                      <option value="scrolled-doc">Scrolled</option>
-                    </select>
-                  </div>
-                  <div style={{ display:'flex', gap:8, alignItems:'center', justifyContent: 'space-between' }}>
-                    <span>Focus Mode</span>
-                    <button type="button" onClick={() => { setFocusMode(true); setSettingsOpen(false); }} disabled={!bytes}>
-                      Enable
-                    </button>
-                  </div>
-                </div>
-              )}
+              {settingsOpen && <SettingsPanel
+                settings={settings}
+                onChange={setSettings}
+                onClose={() => setSettingsOpen(false)}
+                canFocus={Boolean(bytes)}
+                onFocusMode={() => { setFocusMode(true); setSettingsOpen(false); }}
+              />}
             </div>
 
           </nav>
 
 
           <div style={{ display:'flex', gap:8, alignItems:'center', minWidth:140, justifyContent:'flex-end' }}>
-            {(settings.flow || 'paginated') === 'paginated' && (
+            {settings.flow === 'paginated' && (
               <span style={{ color:'#6b7280' }}>
                 {page && total ? `Page ${page} / ${total}` : '—'}
               </span>
@@ -397,7 +342,7 @@ useEffect(() => {
         {/* Reader */}
         <main style={{ border:'1px solid #ddd', borderRadius:8, height:'100%', overflow:'hidden',
           position:'relative',
-          background: settings.theme === 'dark' ? '#0b0f12' : '#fff' }}>
+          background: settings.theme === 'dark' ? '#0b0f12' : settings.theme === 'sepia' ? '#f4ecd8' : '#fff' }}>
           {['requesting-access', 'fetching-metadata', 'downloading'].includes(lifecycle.status) ? (
             <div role="status" style={{ height:'100%', display:'grid', placeItems:'center', color:'#6b7280', padding:32, textAlign:'center' }}>
               <div><strong style={{ display:'block', color:'#111827', marginBottom:8 }}>{lifecycle.status === 'requesting-access' ? 'Requesting Google Drive access…' : lifecycle.status === 'fetching-metadata' ? 'Checking the selected book…' : `Downloading ${selectedFile?.name || 'your selected book'}…`}</strong>Please keep this page open.</div>
@@ -407,12 +352,8 @@ useEffect(() => {
               <Reader
                 bytes={bytes}
                 startCfi={cfi}
-                theme={settings.theme}
-                fontScale={settings.fontScale}
-                lineHeight={settings.lineHeight}
-                fontFamily={settings.fontFamily}
-                flow={settings.flow || 'paginated'}
-                onRelocate={(loc: any) => {
+                settings={settings}
+                onRelocate={(loc) => {
                   const newCfi: string | undefined = loc?.start?.cfi;
                   if (newCfi) {
                     setCfi(newCfi);
@@ -471,6 +412,6 @@ useEffect(() => {
           )}
         </main>
       </div>
-    </>
+    </div>
   );
 }
