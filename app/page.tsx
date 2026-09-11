@@ -1,8 +1,9 @@
 'use client';
 import Script from 'next/script';
-import { useMemo, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGoogleToken } from '@/src/hooks/useGoogleToken';
-import { listEpubs, downloadArrayBuffer, loadRemoteProgress, saveRemoteProgress } from '@/src/lib/drive';
+import { downloadEpub, loadRemoteProgress, saveRemoteProgress, type DriveFileMetadata } from '@/src/lib/drive';
+import { parseDriveLaunchState, type DriveLaunchState } from '@/src/lib/driveLaunch';
 import { loadSettings, saveSettings } from '@/src/lib/settings';
 import { loadAllLocalProgress, saveAllLocalProgress, mergeProgress, type Progress } from '@/src/lib/progress';
 import type { Settings } from '@/src/lib/settings';
@@ -10,19 +11,10 @@ import Reader from '@/src/components/Reader';
 
 const isDebug = typeof window !== 'undefined' && window.location.search.includes('debug=true');
 
-type DriveFile = {
-  id: string;
-  name: string;
-  path: string;
-  modifiedTime: string;
-  size: string;
-  iconLink: string;
-};
 type Controls = { goTo: (t: string) => Promise<void>; next: () => Promise<void>; prev: () => Promise<void> };
 
 export default function Home() {
   const { token, ready, request } = useGoogleToken();
-  const [files, setFiles] = useState<DriveFile[]>([]);
   const [bytes, setBytes] = useState<ArrayBuffer | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
   const [cfi, setCfi] = useState<string | undefined>();
@@ -37,9 +29,9 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<Progress>({});
-  const [sortBy, setSortBy] = useState<'modifiedTime' | 'name'>('modifiedTime');
-  const [filter, setFilter] = useState('');
+  const [launch, setLaunch] = useState<DriveLaunchState>({ status: 'missing' });
   const [pendingDriveFileId, setPendingDriveFileId] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<DriveFileMetadata | null>(null);
 
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<Controls | null>(null);
@@ -75,48 +67,16 @@ export default function Home() {
     }, 1000);
   }
 
-  const sortedAndFilteredFiles = useMemo(() => {
-    if (!files) return [];
-    const filtered = files.filter(f => f.name.toLowerCase().includes(filter.toLowerCase()));
-    filtered.sort((a, b) => {
-      if (sortBy === 'name') {
-        return a.name.localeCompare(b.name);
-      }
-      // modifiedTime
-      return new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime();
-    });
-    return filtered;
-  }, [files, sortBy, filter]);
-
-  // Handle files launched from Google Drive via "Open with DriveRead"
-useEffect(() => {
-  const params = new URLSearchParams(window.location.search);
-  const stateParam = params.get('state');
-
-  if (!stateParam) return;
-
-  try {
-    const driveState = JSON.parse(stateParam);
-
-    if (
-      driveState?.action === 'open' &&
-      Array.isArray(driveState?.ids) &&
-      driveState.ids.length > 0
-    ) {
-      const id = driveState.ids[0];
-
-      if (isDebug) {
-        console.log('DriveRead launched from Google Drive:', id);
-      }
-
-      setPendingDriveFileId(id);
+  // Handle files launched from Google Drive via "Open with DriveRead".
+  useEffect(() => {
+    const parsed = parseDriveLaunchState(new URLSearchParams(window.location.search).get('state'));
+    setLaunch(parsed);
+    if (parsed.status === 'valid') {
+      setPendingDriveFileId(parsed.fileId);
     }
-  } catch (e) {
-    console.error('Unable to parse Google Drive launch state:', e);
-  }
-}, []);
+  }, []);
 
-// Automatically sign in when launched from Google Drive
+  // Automatically sign in when launched from Google Drive
 useEffect(() => {
   if (
     pendingDriveFileId &&
@@ -166,16 +126,6 @@ useEffect(() => {
 
     if (isDebug) console.log('page.tsx: Calling syncProgress with token.');
     syncProgress(token);
-    if (isDebug) console.log('page.tsx: Calling listEpubs with token.');
-    listEpubs(token)
-      .then(d => {
-        if (isDebug) console.log('page.tsx: listEpubs successful, received files:', d.files);
-        setFiles(d.files);
-      })
-      .catch(e => {
-        if (isDebug) console.error('page.tsx: listEpubs failed:', e);
-        setError(String(e));
-      });
   }, [token]);
 
   useEffect(() => {
@@ -196,14 +146,15 @@ useEffect(() => {
     setPercent(null);
     setError(null);
     try {
-      const buf = await downloadArrayBuffer(token, id);
-      if (isDebug) console.log(`page.tsx: File ${id} downloaded, buffer size: ${buf.byteLength}`);
+      const { metadata, buffer } = await downloadEpub(token, id, setSelectedFile);
+      setSelectedFile(metadata);
+      if (isDebug) console.log(`page.tsx: File ${id} downloaded, buffer size: ${buffer.byteLength}`);
       setFileId(id);
-      setBytes(buf);
+      setBytes(buffer);
       setCfi(progress[id]?.cfi);
     } catch (e: any) {
       if (isDebug) console.error(`page.tsx: Error opening file ${id}:`, e);
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       if (isDebug) console.log(`page.tsx: Finished opening file ${id}`);
       setLoading(false);
@@ -248,19 +199,6 @@ useEffect(() => {
 
   return (
     <>
-      <style jsx>{`
-        .file-button:hover {
-          background-color: #f0f0f0;
-          border-color: #ddd;
-        }
-        .file-button[data-active="true"] {
-          background-color: #e0e8f0;
-          border-color: #c0d0e0;
-        }
-        .file-button:disabled {
-          opacity: 0.6;
-        }
-      `}</style>
       <Script src="https://accounts.google.com/gsi/client" async defer />
 
       {!focusMode && (
@@ -269,7 +207,7 @@ useEffect(() => {
             borderBottom:'1px solid #e5e5e5', position:'sticky', top:0,
             background:'#fff', zIndex:10
           }}>
-          <h1 style={{ margin:0, fontSize:18 }}>DriveRead</h1>
+          <div style={{ minWidth: 0 }}><h1 style={{ margin:0, fontSize:18 }}>DriveRead</h1>{selectedFile && <div title={selectedFile.name} style={{ color:'#6b7280', fontSize:12, maxWidth:300, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{selectedFile.name}</div>}</div>
           <nav role="menubar" style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
             {/* Page navigation buttons */}
             <button
@@ -417,59 +355,12 @@ useEffect(() => {
       <div
         style={{
           display:'grid',
-          gridTemplateColumns: focusMode ? '1fr' : '320px 280px 1fr',
+          gridTemplateColumns: focusMode ? '1fr' : '280px minmax(0, 1fr)',
           gap:16,
           padding:16,
           height:'calc(100vh - 58px)'
         }}
       >
-        {/* Library */}
-         {!focusMode && (
-          <aside style={{ overflow:'hidden', border:'1px solid #ddd', borderRadius:8, padding:8, display: 'flex', flexDirection: 'column' }}>
-            <h3 style={{ marginTop:0, paddingBottom: 8, borderBottom: '1px solid #eee' }}>Your Drive EPUBs</h3>
-
-            <div style={{ display: 'flex', gap: 8, padding: '8px 0', borderBottom: '1px solid #eee', flexShrink: 0 }}>
-              <input
-                type="text"
-                placeholder="Filter by name..."
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                style={{ flexGrow: 1, padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6 }}
-              />
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
-                style={{ padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6 }}
-              >
-                <option value="modifiedTime">Sort by Date</option>
-                <option value="name">Sort by Name</option>
-              </select>
-            </div>
-
-            {!token && <p>Sign in to list files.</p>}
-            {error && <p style={{ color:'#b00' }}>{error}</p>}
-            <div style={{ overflowY: 'auto', flexGrow: 1, paddingTop: 8 }}>
-              {sortedAndFilteredFiles.map(f => (
-                <button
-                  key={f.id}
-                  className="file-button"
-                  data-active={f.id === fileId}
-                  onClick={() => openFile(f.id)}
-                  disabled={loading}
-                  style={{ display:'flex', alignItems: 'center', gap: 8, width:'100%', textAlign:'left', padding:'6px 8px', borderRadius:6, border:'1px solid transparent', marginBottom:2, cursor: 'pointer' }}>
-                  <img src={f.iconLink} alt="epub icon" width={16} height={16} />
-                  <div style={{ flexGrow: 1, overflow: 'hidden' }}>
-                    <div style={{ fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
-                    <div style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'  }} title={f.path}>{f.path || '/'}</div>
-                    <div style={{ fontSize: 12, color: '#888' }}>
-                      {new Date(f.modifiedTime).toISOString().slice(0, 10)} - {f.size ? `${Math.round(parseInt(f.size) / 1024)} KB` : ''}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </aside>
-        )}
         {/* TOC */}
         {!focusMode && (
         <aside style={{ overflow:'auto', border:'1px solid #ddd', borderRadius:8, padding:8 }}>
@@ -489,8 +380,8 @@ useEffect(() => {
           position:'relative',
           background: settings.theme === 'dark' ? '#0b0f12' : '#fff' }}>
           {loading ? (
-            <div style={{ height:'100%', display:'grid', placeItems:'center', color:'#888' }}>
-              Loading book...
+            <div role="status" style={{ height:'100%', display:'grid', placeItems:'center', color:'#6b7280', padding:32, textAlign:'center' }}>
+              <div><strong style={{ display:'block', color:'#111827', marginBottom:8 }}>Downloading {selectedFile?.name || 'your selected book'}…</strong>DriveRead is securely fetching it from Google Drive.</div>
             </div>
           ) : bytes ? (
             <>
@@ -533,8 +424,29 @@ useEffect(() => {
               </div>
             </>
           ) : (
-            <div style={{ height:'100%', display:'grid', placeItems:'center', color:'#888' }}>
-              Pick a book…
+            <div style={{ height:'100%', overflow:'auto', display:'grid', placeItems:'center', padding:'48px 24px', background:'linear-gradient(145deg, #f8fafc, #eef2ff)' }}>
+              <section style={{ width:'min(620px, 100%)', background:'#fff', border:'1px solid #e2e8f0', borderRadius:20, padding:'clamp(24px, 5vw, 48px)', boxShadow:'0 18px 50px rgba(30, 41, 59, .10)' }}>
+                <div style={{ color:'#4f46e5', fontWeight:700, letterSpacing:'.08em', fontSize:12, textTransform:'uppercase' }}>Your books, distraction-free</div>
+                <h2 style={{ margin:'10px 0 12px', fontSize:'clamp(28px, 5vw, 40px)', lineHeight:1.1 }}>Read an EPUB from Google Drive</h2>
+                {error || launch.status === 'invalid' ? (
+                  <div role="alert" style={{ margin:'20px 0', padding:16, borderRadius:10, background:'#fef2f2', color:'#991b1b' }}>
+                    <strong>We couldn’t open this book.</strong><div style={{ marginTop:5 }}>{error || (launch.status === 'invalid' && launch.message)}</div>
+                  </div>
+                ) : launch.status === 'valid' && !token ? (
+                  <div role="status" style={{ margin:'20px 0', padding:16, borderRadius:10, background:'#eef2ff', color:'#3730a3' }}>
+                    <strong>Waiting for Google authentication…</strong><div style={{ marginTop:5 }}>Sign in when prompted so DriveRead can access the selected book.</div>
+                  </div>
+                ) : (
+                  <p style={{ color:'#475569', fontSize:17, lineHeight:1.6 }}>DriveRead opens only the book you choose. Start in Drive, then send one EPUB here with <strong>Open with</strong>.</p>
+                )}
+                <a href="https://drive.google.com/drive/my-drive" target="_blank" rel="noreferrer" style={{ display:'inline-block', margin:'12px 0 28px', padding:'12px 18px', borderRadius:9, background:'#4f46e5', color:'#fff', textDecoration:'none', fontWeight:700 }}>Open Google Drive ↗</a>
+                <ol style={{ margin:0, paddingLeft:22, color:'#334155', lineHeight:1.8 }}>
+                  <li>Find the EPUB you want to read in Google Drive.</li>
+                  <li>Right-click it and choose <strong>Open with</strong>.</li>
+                  <li>Select <strong>DriveRead</strong>; the book will open here.</li>
+                </ol>
+                {launch.status === 'missing' && <p style={{ margin:'24px 0 0', paddingTop:18, borderTop:'1px solid #e2e8f0', color:'#64748b', fontSize:14 }}>You visited DriveRead directly, so no file was selected. Choose one in Google Drive using the steps above.</p>}
+              </section>
             </div>
           )}
         </main>

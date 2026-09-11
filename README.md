@@ -1,38 +1,32 @@
-# DriveRead (Starter)
+# DriveRead
 
-A static, client‑only EPUB reader for Google Drive.
+A static, client-only EPUB reader launched through Google Drive's **Open with** menu.
 
-- Frontend: Next.js (static export)
-- Auth: Google Identity Services token client
-- Storage: Google Drive (`drive.readonly`)
+- Frontend: Next.js static export
+- Authentication: Google Identity Services token client
+- File access: Google Drive `drive.file` (only files explicitly opened with DriveRead)
+- Progress sync: Google Drive `drive.appdata`
 - Reader: epub.js
-- Hosting: GitHub Pages (Org/User site)
 
-## Quick start
+## Set up Google Cloud
 
-1) **Google Cloud** (project: your `online-epub-reader`):
-   - Enable **Google Drive API**.
-   - OAuth consent screen: add `github.io` to authorised domains, add yourself as a test user.
-   - Create **OAuth Client ID (Web)** with **Authorised JavaScript origin** `https://driveread.github.io`.
-   - Copy the **Client ID**.
+Follow the complete [Google Cloud and Drive UI integration guide](docs/google-cloud-setup.md). It covers the OAuth client, the least-privilege scopes, and registering DriveRead as an EPUB **Open with** handler.
 
-2) **Repo secret**
-   - In GitHub repo: Settings → Secrets and variables → Actions → New secret  
-     `NEXT_PUBLIC_GOOGLE_CLIENT_ID = <your client id>`
+DriveRead deliberately does not request `drive.readonly` and does not list a user's files. The `drive.appdata` scope is included only because reading progress currently syncs to the app's private Drive data folder; remove the remote-progress feature and that scope together if roaming progress is not wanted.
 
-3) **Run locally**
+## Run locally
+
 ```bash
 npm ci
 NEXT_PUBLIC_GOOGLE_CLIENT_ID="<id>.apps.googleusercontent.com" npm run dev
-# build/export
+
+# Build and serve the static export
 NEXT_PUBLIC_GOOGLE_CLIENT_ID="<id>.apps.googleusercontent.com" npm run build
 npx serve out -p 3000
 ```
 
-4) **Deploy**
-- Push to `main`. GitHub Action will build and publish to Pages.
-- Visit `https://driveread.github.io`.
+Tokens stay in memory; DriveRead has no server. When launched from Drive, it validates the launch payload, requests authentication, verifies the selected file is an EPUB, and downloads that single file. A direct visit does not authenticate or display a file browser—instead, the landing page explains how to open a book from Drive.
 
-## Notes
-- Tokens are kept in-memory only. No server is used.
-- Optional roaming progress can be added later using Drive AppData scope.
+## Deploy
+
+Set `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in **GitHub repository → Settings → Secrets and variables → Actions**, then push to `main`; the GitHub Actions workflow builds and publishes the Pages site.
