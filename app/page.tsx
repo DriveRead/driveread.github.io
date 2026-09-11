@@ -127,10 +127,7 @@ useEffect(() => {
   }
 }, [pendingDriveFileId, token, ready, request]);
 
-// Your existing handleClickOutside effect follows...
-useEffect(() => {
-  function handleClickOutside(event: MouseEvent) {
-  
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (settingsMenuRef.current && !settingsMenuRef.current.contains(event.target as Node)) {
