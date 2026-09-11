@@ -1,6 +1,6 @@
 'use client';
 import Script from 'next/script';
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useGoogleToken } from '@/src/hooks/useGoogleToken';
 import { downloadEpub, DriveError, loadRemoteProgress, saveRemoteProgress, type DriveFileMetadata } from '@/src/lib/drive';
 import { parseDriveLaunchState, type DriveLaunchState } from '@/src/lib/driveLaunch';
@@ -9,6 +9,9 @@ import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '@/src/lib/settings
 import { addBookmark, loadAllLocalProgress, saveAllLocalProgress, mergeProgress, removeBookmark, READING_RECORD_VERSION, type Progress } from '@/src/lib/progress';
 import { adjacentChapter, flattenToc, isEditableTarget } from '@/src/lib/readerNavigation';
 import type { Settings } from '@/src/lib/settings';
+import type { ContextualPanelId } from '@/src/lib/settings';
+import { panelReducer, restorePanel, PINNED_PANEL_MIN_WIDTH } from '@/src/lib/contextualPanel';
+import ContextualPanel from '@/src/components/ContextualPanel';
 import Reader, { type ReaderControls } from '@/src/components/Reader';
 import SettingsPanel from '@/src/components/settings/SettingsPanel';
 import AppShell from '@/src/components/AppShell';
@@ -16,7 +19,7 @@ import LaunchScreen from '@/src/components/LaunchScreen';
 import ReaderToolbar from '@/src/components/ReaderToolbar';
 import ContentsPanel from '@/src/components/ContentsPanel';
 import type { TocItem } from '@/src/components/ContentsPanel';
-import { BookmarksDialog, ShortcutsDialog } from '@/src/components/ReaderDialogs';
+import { ShortcutsDialog } from '@/src/components/ReaderDialogs';
 
 const isDebug = typeof window !== 'undefined' && window.location.search.includes('debug=true');
 
@@ -36,9 +39,8 @@ export default function Home() {
   const [percent, setPercent] = useState<number | null>(null);
   const [locations, setLocations] = useState<number | null>(null);
   const [focusMode, setFocusMode] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [tocOpen, setTocOpen] = useState(false);
-  const [bookmarksOpen, setBookmarksOpen] = useState(false);
+  const [panel, dispatchPanel] = useReducer(panelReducer, { active: null, pinned: false });
+  const [widePanelViewport, setWidePanelViewport] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>('local');
   const [progress, setProgress] = useState<Progress>({});
@@ -52,6 +54,8 @@ export default function Home() {
   const pendingSync = useRef(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const contentsButtonRef = useRef<HTMLButtonElement>(null);
+  const bookmarksButtonRef = useRef<HTMLButtonElement>(null);
+  const infoButtonRef = useRef<HTMLButtonElement>(null);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
 
   useEffect(() => {
@@ -174,8 +178,19 @@ useEffect(() => {
 
   useEffect(() => {
     // Load settings from localStorage on the client side only to avoid hydration mismatch
-    setSettings(loadSettings());
+    const loaded = loadSettings();
+    setSettings(loaded);
+    const wide = window.innerWidth >= PINNED_PANEL_MIN_WIDTH;
+    setWidePanelViewport(wide);
+    const restored = restorePanel(loaded.panelPinned, loaded.lastPinnedPanel, wide);
+    if (restored.active) dispatchPanel({ type: 'open', panel: restored.active, wide, preferPinned: true });
     setSettingsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia(`(min-width: ${PINNED_PANEL_MIN_WIDTH}px)`);
+    const update = () => { setWidePanelViewport(media.matches); dispatchPanel({ type: 'viewport', wide: media.matches }); };
+    media.addEventListener('change', update); return () => media.removeEventListener('change', update);
   }, []);
   
   async function openFile(id: string) {
@@ -235,6 +250,24 @@ useEffect(() => {
   // persist settings when changed
   useEffect(() => { if (settingsHydrated) saveSettings(settings); }, [settings, settingsHydrated]);
 
+  const openPanel = (active: ContextualPanelId) => {
+    dispatchPanel({ type: 'open', panel: active, wide: widePanelViewport });
+    if (panel.pinned && widePanelViewport) setSettings(value => ({ ...value, panelPinned: true, lastPinnedPanel: active }));
+  };
+  const closePanel = useCallback(() => {
+    dispatchPanel({ type: 'close' });
+    if (panel.pinned) setSettings(value => ({ ...value, panelPinned: false, lastPinnedPanel: null }));
+  }, [panel.pinned]);
+  const pinPanel = () => {
+    if (!panel.active || !widePanelViewport) return;
+    dispatchPanel({ type: 'pin', wide: true });
+    setSettings(value => ({ ...value, panelPinned: true, lastPinnedPanel: panel.active }));
+  };
+  const unpinPanel = () => {
+    dispatchPanel({ type: 'unpin' });
+    setSettings(value => ({ ...value, panelPinned: false }));
+  };
+
   const currentChapter = currentHref ? flattenToc(toc).find(item => item.href.split('#')[0] === currentHref.split('#')[0])?.label : undefined;
   const currentBookmarks = fileId ? progress[fileId]?.bookmarks || [] : [];
   const bookmarked = Boolean(cfi && currentBookmarks.some(bookmark => bookmark.cfi === cfi));
@@ -246,13 +279,13 @@ useEffect(() => {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (isEditableTarget(e.target)) return;
-      if (e.key === 'Escape') { setHelpOpen(false); setBookmarksOpen(false); setTocOpen(false); setSettingsOpen(false); setFocusMode(false); return; }
+      if (e.key === 'Escape') { setHelpOpen(false); if (!panel.pinned) closePanel(); setFocusMode(false); return; }
       if (e.key === '?') { e.preventDefault(); setHelpOpen(true); return; }
       if (!controlsRef.current) return;
       if (e.key === 'ArrowRight') { e.preventDefault(); e.shiftKey ? goToNextChapter() : controlsRef.current.next(); }
       if (e.key === 'ArrowLeft')  { e.preventDefault(); e.shiftKey ? goToPrevChapter() : controlsRef.current.prev(); }
-      if (e.key.toLowerCase() === 'c') { e.preventDefault(); setTocOpen(true); }
-      if (e.key.toLowerCase() === 's') { e.preventDefault(); setSettingsOpen(true); }
+      if (e.key.toLowerCase() === 'c') { e.preventDefault(); openPanel('contents'); }
+      if (e.key.toLowerCase() === 's') { e.preventDefault(); openPanel('settings'); }
       if (e.key.toLowerCase() === 'b') { e.preventDefault(); toggleBookmark(); }
       if (e.key.toLowerCase() === 'f') { e.preventDefault(); setFocusMode(value => !value); }
       if (e.key === '+' || e.key === '=') {
@@ -267,7 +300,7 @@ useEffect(() => {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [focusMode, currentHref, toc, cfi, fileId, currentChapter, token]);
+  }, [focusMode, currentHref, toc, cfi, fileId, currentChapter, token, panel.pinned, widePanelViewport]);
   /* eslint-enable react-hooks/exhaustive-deps */
   const loading = ['requesting-access', 'fetching-metadata', 'downloading'].includes(lifecycle.status);
 
@@ -275,8 +308,9 @@ useEffect(() => {
     <AppShell theme={settings.theme}>
       <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={auth.scriptLoaded} onError={auth.scriptFailed} />
       {!focusMode && (
-        <ReaderToolbar bookTitle={selectedFile?.name} chapterTitle={currentChapter} hasBook={Boolean(bytes)} page={page} total={total} locations={locations} percent={percent} tocOpen={tocOpen} settingsOpen={settingsOpen} bookmarked={bookmarked} syncLabel={syncLabel} onContents={() => setTocOpen(true)} onSettings={() => setSettingsOpen(true)} onPrev={() => controlsRef.current?.prev()} onNext={() => controlsRef.current?.next()} onPrevChapter={goToPrevChapter} onNextChapter={goToNextChapter} onBookmark={toggleBookmark} onBookmarks={() => setBookmarksOpen(true)} onHelp={() => setHelpOpen(true)} onSeek={value => controlsRef.current?.goToPercentage(value / 100)} onFocus={() => setFocusMode(true)} settingsButtonRef={settingsButtonRef} contentsButtonRef={contentsButtonRef} />
+        <ReaderToolbar bookTitle={selectedFile?.name} chapterTitle={currentChapter} hasBook={Boolean(bytes)} page={page} total={total} locations={locations} percent={percent} tocOpen={panel.active === 'contents'} settingsOpen={panel.active === 'settings'} bookmarked={bookmarked} syncLabel={syncLabel} onContents={() => openPanel('contents')} onSettings={() => openPanel('settings')} onPrev={() => controlsRef.current?.prev()} onNext={() => controlsRef.current?.next()} onPrevChapter={goToPrevChapter} onNextChapter={goToNextChapter} onBookmark={toggleBookmark} onBookmarks={() => openPanel('bookmarks')} onBookInfo={() => openPanel('book-info')} onHelp={() => setHelpOpen(true)} onSeek={value => controlsRef.current?.goToPercentage(value / 100)} onFocus={() => setFocusMode(true)} settingsButtonRef={settingsButtonRef} contentsButtonRef={contentsButtonRef} bookmarksButtonRef={bookmarksButtonRef} infoButtonRef={infoButtonRef} />
       )}
+      <div className={`reader-layout${panel.pinned ? ' has-pinned-panel' : ''}`}>
       <div className={`reader-workspace${focusMode ? ' is-focus-mode' : ''}`}>
         <main className="reader-surface">
           {loading ? (
@@ -318,9 +352,13 @@ useEffect(() => {
           )}
         </main>
       </div>
-      <ContentsPanel open={tocOpen} items={toc} currentHref={currentHref} onSelect={href => controlsRef.current?.goTo(href)} onClose={() => setTocOpen(false)} returnFocusRef={contentsButtonRef} />
-      <SettingsPanel open={settingsOpen} settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} canFocus={Boolean(bytes)} onFocusMode={() => { setFocusMode(true); setSettingsOpen(false); }} returnFocusRef={settingsButtonRef} />
-      <BookmarksDialog open={bookmarksOpen} bookmarks={currentBookmarks} onSelect={target => controlsRef.current?.goTo(target)} onRemove={target => { if (fileId && progressRef.current[fileId]) persistProgress({ ...progressRef.current, [fileId]: removeBookmark(progressRef.current[fileId], target) }); }} onRestart={() => controlsRef.current?.goToPercentage(0)} onClose={() => setBookmarksOpen(false)} />
+      <ContextualPanel open={Boolean(panel.active)} pinned={panel.pinned} title={panel.active === 'settings' ? 'Reading settings' : panel.active === 'contents' ? 'Contents' : panel.active === 'bookmarks' ? 'Bookmarks' : 'Book information'} side="end" openerRef={panel.active === 'settings' ? settingsButtonRef : panel.active === 'contents' ? contentsButtonRef : panel.active === 'bookmarks' ? bookmarksButtonRef : infoButtonRef} onPin={pinPanel} onUnpin={unpinPanel} onClose={closePanel}>
+        {panel.active === 'contents' && <ContentsPanel items={toc} currentHref={currentHref} onSelect={href => { controlsRef.current?.goTo(href); if (!panel.pinned) closePanel(); }} />}
+        {panel.active === 'settings' && <SettingsPanel settings={settings} onChange={setSettings} canFocus={Boolean(bytes)} onFocusMode={() => { setFocusMode(true); closePanel(); }} />}
+        {panel.active === 'bookmarks' && <div className="panel-body">{currentBookmarks.length ? <ul className="bookmark-list">{currentBookmarks.map(bookmark => <li key={bookmark.cfi}><button onClick={() => { controlsRef.current?.goTo(bookmark.cfi); if (!panel.pinned) closePanel(); }}>{bookmark.label || new Date(bookmark.created).toLocaleString()}</button><button aria-label={`Remove ${bookmark.label || 'bookmark'}`} onClick={() => { if (fileId && progressRef.current[fileId]) persistProgress({ ...progressRef.current, [fileId]: removeBookmark(progressRef.current[fileId], bookmark.cfi) }); }}>Remove</button></li>)}</ul> : <p className="empty-state">No bookmarks yet.</p>}</div>}
+        {panel.active === 'book-info' && <dl className="book-information panel-body"><dt>Title</dt><dd>{selectedFile?.name || 'Unknown'}</dd><dt>Current chapter</dt><dd>{currentChapter || 'Unknown'}</dd><dt>Progress</dt><dd>{percent === null ? 'Not available' : `${percent}%`}</dd></dl>}
+      </ContextualPanel>
+      </div>
       <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </AppShell>
   );

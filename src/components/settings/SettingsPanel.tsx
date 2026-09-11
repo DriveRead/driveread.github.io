@@ -1,25 +1,20 @@
 'use client';
-import { type ChangeEvent, type RefObject, useRef } from 'react';
-import { useDialogFocus } from '@/src/components/useDialogFocus';
+import { type ChangeEvent } from 'react';
 import {
   DEFAULT_SETTINGS, FONT_FAMILIES, FLOWS, SPREAD_MODES, THEMES,
   resetSection, resetSettings, updateSetting,
   type FontFamily, type Flow, type Settings, type SettingsSection, type SpreadMode, type Theme,
 } from '@/src/lib/settings';
 
-type Props = { open: boolean; settings: Settings; onChange: (settings: Settings) => void; onClose: () => void; onFocusMode: () => void; canFocus: boolean; returnFocusRef: RefObject<HTMLElement> };
+type Props = { settings: Settings; onChange: (settings: Settings) => void; onFocusMode: () => void; canFocus: boolean };
 const fontNames: Record<FontFamily, string> = { os: 'OS default', serif: 'Serif', sans: 'Sans', opendyslexic: 'Open Dyslexic', atkinson: 'Atkinson Hyperlegible', roboto: 'Roboto', robotomono: 'Roboto Mono' };
 
-export default function SettingsPanel({ open, settings, onChange, onClose, onFocusMode, canFocus, returnFocusRef }: Props) {
-  const panelRef = useRef<HTMLElement>(null);
-  useDialogFocus(open, panelRef, onClose, returnFocusRef);
+export default function SettingsPanel({ settings, onChange, onFocusMode, canFocus }: Props) {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => onChange(updateSetting(settings, key, value));
   const range = (key: 'fontSize' | 'lineHeight' | 'contentWidth' | 'pageMargins' | 'paragraphSpacing') =>
     (event: ChangeEvent<HTMLInputElement>) => set(key, Number(event.target.value));
   const reset = (section: SettingsSection) => onChange(resetSection(settings, section));
-  if (!open) return null;
-  return <><button className="sheet-backdrop" tabIndex={-1} aria-label="Close settings" onClick={onClose} /><aside ref={panelRef} className="side-sheet sheet-right settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-    <header className="settings-heading"><h2 id="settings-title">Reading settings</h2><button onClick={onClose} aria-label="Close settings">✕</button></header>
+  return <div className="settings-panel">
     <section><SectionTitle title="Appearance" onReset={() => reset('appearance')} />
       <fieldset><legend>Theme</legend><div className="choice-row">{THEMES.map(theme => <label key={theme}><input type="radio" name="theme" checked={settings.theme === theme} onChange={() => set('theme', theme as Theme)} /> {theme[0].toUpperCase() + theme.slice(1)}</label>)}</div></fieldset>
       <label className="control-row"><span>Reduce motion <small>Use system</small></span><select value={settings.reducedMotion === null ? 'system' : String(settings.reducedMotion)} onChange={e => set('reducedMotion', e.target.value === 'system' ? null : e.target.value === 'true')}><option value="system">System</option><option value="true">On</option><option value="false">Off</option></select></label>
@@ -42,8 +37,8 @@ export default function SettingsPanel({ open, settings, onChange, onClose, onFoc
       <button onClick={onFocusMode} disabled={!canFocus}>Enter focus mode</button>
     </section>
     <div className={`settings-preview preview-${settings.fontFamily}`} aria-label="Settings preview"><strong>Preview</strong><p>A comfortable page keeps the story in focus.</p></div>
-    <footer><button className="danger-button" onClick={() => onChange(resetSettings())} disabled={JSON.stringify(settings) === JSON.stringify(DEFAULT_SETTINGS)}>Reset all</button></footer>
-  </aside></>;
+    <footer><button className="danger-button" onClick={() => onChange({ ...resetSettings(), panelPinned: settings.panelPinned, lastPinnedPanel: settings.lastPinnedPanel })} disabled={JSON.stringify(settings) === JSON.stringify(DEFAULT_SETTINGS)}>Reset reading settings</button></footer>
+  </div>;
 }
 
 function SectionTitle({ title, onReset }: { title: string; onReset: () => void }) { return <div className="section-title"><h3>{title}</h3><button onClick={onReset}>Reset section</button></div>; }

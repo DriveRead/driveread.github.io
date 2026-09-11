@@ -216,6 +216,25 @@ export default function Reader({
     }
   }, [settings.fontSize, settings.lineHeight, settings.fontFamily, settings.contentWidth, settings.pageMargins, settings.paragraphSpacing, settings.textAlignment, settings.hyphenation, settings.reducedMotion]);
 
+  // A pinned panel changes the rendition's container width. Resize at the same
+  // CFI so pagination reflows without moving the reader's logical location.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rendition = renditionRef.current;
+        const currentCfi = rendition?.location?.start?.cfi;
+        rendition?.resize?.(container.clientWidth, container.clientHeight);
+        if (currentCfi) rendition.display(currentCfi);
+      });
+    });
+    observer.observe(container);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [bytes]);
+
   return (
     <div ref={containerRef} className="epub-reader">
       {settings.flow === 'paginated' && (
