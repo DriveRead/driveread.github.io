@@ -3,6 +3,8 @@ import { useEffect, useRef } from 'react';
 import type { Settings } from '@/src/lib/settings';
 import type { TocItem } from './ContentsPanel';
 import { isEditableTarget } from '@/src/lib/readerNavigation';
+import { openExternalEpubLink, classifyEpubLink } from '@/src/lib/readerSecurity';
+import { publicAssetUrl, READER_FONT_ASSETS } from '@/src/lib/readerAssets';
 
 export type ReaderControls = {
   goTo: (hrefOrCfi: string) => Promise<void>;
@@ -25,7 +27,7 @@ export default function Reader({
   startCfi?: string;
   onRelocate?: (loc: ReaderLocation) => void;
   onToc?: (items: TocItem[]) => void;
-  onReady?: (controls: ReaderControls) => void;
+  onReady?: (controls: ReaderControls | null) => void;
   settings: Settings;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -44,7 +46,9 @@ export default function Reader({
       height: '100%',
       flow: settings.flow,
       spread: settings.spread,
-      allowScriptedContent: true,
+      // Book JavaScript is deliberately disabled. This does not affect EPUB CSS,
+      // images, normal hyperlinks, or rendition-driven navigation.
+      allowScriptedContent: false,
     });
     renditionRef.current = rendition;
 
@@ -53,12 +57,11 @@ export default function Reader({
     rendition.themes.register('sepia', { body: { background: '#f4ecd8', color: '#433422' } });
     rendition.themes.register('dark', { body: { background: '#0b0f12', color: '#e7e7e7' } });
 
-    // Optional font faces (served from /public/fonts)
+    // Optional font faces (deployed from the root public/fonts directory)
     try {
-      rendition.themes.registerFont('Open Dyslexic', '/fonts/OpenDyslexic-Regular.woff2');
-      rendition.themes.registerFont('Atkinson Hyperlegible', '/fonts/Atkinson-Hyperlegible-Regular.woff2');
-      rendition.themes.registerFont('Roboto', '/fonts/Roboto-Regular.woff2');
-      rendition.themes.registerFont('Roboto Mono', '/fonts/RobotoMono-Regular.woff2');
+      for (const [family, path] of READER_FONT_ASSETS) {
+        rendition.themes.registerFont(family, publicAssetUrl(path));
+      }
     } catch {
       // Safe to ignore if files aren’t present
     }
@@ -67,7 +70,7 @@ export default function Reader({
     rendition.display(startCfi || undefined);
 
     // Relocation → bubble full 'loc'
-    rendition.on('relocated', (loc: any) => {
+    const onRelocated = (loc: any) => {
       const cfi = loc?.start?.cfi;
       onRelocate?.({
         ...loc,
@@ -75,10 +78,13 @@ export default function Reader({
         location: typeof cfi === 'string' && book.locations?.length?.() ? book.locations.locationFromCfi(cfi) : undefined,
         totalLocations: book.locations?.length?.() || undefined,
       });
-    });
+    };
+    rendition.on('relocated', onRelocated);
 
     // TOC
+    let active = true;
     book.loaded.navigation.then((nav: any) => {
+      if (!active) return;
       const mapItem = (i: any): TocItem => ({
         href: i.href,
         label: i.label,
@@ -89,6 +95,7 @@ export default function Reader({
     });
 
     // Arrow keys inside iframe
+    const renderedCleanups = new Set<() => void>();
     const onRendered = (section: any, view: any) => {
       const doc: Document | undefined = section.document;
       if (!doc) return;
@@ -98,8 +105,29 @@ export default function Reader({
         if (e.key === 'ArrowRight') { e.preventDefault(); renditionRef.current.next(); }
         if (e.key === 'ArrowLeft')  { e.preventDefault(); renditionRef.current.prev(); }
       };
+      const onClick = (event: MouseEvent) => {
+        // Elements belong to the iframe's realm, so avoid the parent window's
+        // `instanceof Element` check here.
+        const target = event.target as Element | null;
+        const anchor = typeof target?.closest === 'function' ? target.closest('a[href]') : null;
+        const href = anchor?.getAttribute('href');
+        if (!href) return;
+        const decision = classifyEpubLink(href);
+        if (decision.kind === 'internal') return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (decision.kind === 'external') openExternalEpubLink(href, window);
+      };
       doc.addEventListener('keydown', handler);
-      view.on('detached', () => doc.removeEventListener('keydown', handler));
+      doc.addEventListener('click', onClick);
+      const cleanup = () => {
+        doc.removeEventListener('keydown', handler);
+        doc.removeEventListener('click', onClick);
+        view.off?.('detached', cleanup);
+        renderedCleanups.delete(cleanup);
+      };
+      renderedCleanups.add(cleanup);
+      view.on('detached', cleanup);
     };
     rendition.on('rendered', onRendered);
 
@@ -119,7 +147,16 @@ export default function Reader({
     });
 
     return () => {
+      active = false;
+      // Invalidate parent controls before destroying their underlying rendition.
+      onReady?.(null);
+      renditionRef.current = null;
+      bookRef.current = null;
       try { rendition.off?.('rendered', onRendered); } catch {}
+      try { rendition.off?.('relocated', onRelocated); } catch {}
+      for (const cleanup of [...renderedCleanups]) cleanup();
+      // book.destroy() destroys the rendition, archive/resources, iframe views,
+      // and revokes the object URLs epub.js created for them.
       try { book.destroy(); } catch {}
     };
   }, [bytes]);

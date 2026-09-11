@@ -182,6 +182,7 @@ useEffect(() => {
     if (!token) return;
     if (isDebug) console.log(`page.tsx: Opening file with id: ${id}`);
     dispatchLifecycle({ type: 'AUTHENTICATED' });
+    controlsRef.current = null;
     setBytes(null);
     setFileId(null);
     setCfi(undefined);
@@ -305,7 +306,10 @@ useEffect(() => {
                   if (newCfi && fileId) debouncedSave(fileId, newCfi, pct);
                 }}
                 onToc={setToc}
-                onReady={(controls) => { controlsRef.current = controls; controls.generateLocations().then(setLocations); }}
+                onReady={(controls) => {
+                  controlsRef.current = controls;
+                  if (controls) controls.generateLocations().then(setLocations);
+                }}
               />
               {focusMode && <nav className="focus-controls" aria-label="Distraction-free reading controls"><button onClick={goToPrevChapter} disabled={!currentHref} aria-label="Previous chapter">← <span>Chapter</span></button><div className="focus-progress"><strong>{currentChapter || selectedFile?.name}</strong><span>{percent !== null ? `${percent}%` : ''}</span></div><button onClick={goToNextChapter} disabled={!currentHref} aria-label="Next chapter"><span>Chapter</span> →</button><button className="exit-focus" onClick={() => setFocusMode(false)} title="Exit distraction-free mode (Escape)">Exit focus <span aria-hidden="true">×</span></button></nav>}
             </>
