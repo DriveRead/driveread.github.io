@@ -13,13 +13,26 @@ export type DriveFileMetadata = {
 
 const isDebug = typeof window !== 'undefined' && window.location.search.includes('debug=true');
 
+export type DriveErrorCode = 'unauthorized' | 'permission-denied' | 'missing-file' | 'network' | 'invalid-response';
+export class DriveError extends Error {
+  readonly code: DriveErrorCode;
+  constructor(code: DriveErrorCode, message: string) { super(message); this.code = code; this.name = 'DriveError'; }
+}
+
+function responseError(status: number): DriveError {
+  if (status === 401) return new DriveError('unauthorized', 'Your Google session expired. Authenticate again to open this book.');
+  if (status === 403) return new DriveError('permission-denied', 'Google Drive denied access to this book. Grant access and try again.');
+  if (status === 404) return new DriveError('missing-file', 'This book is missing or was deleted from Google Drive.');
+  return new DriveError('network', 'Google Drive could not be reached. Check your connection and try again.');
+}
+
 export async function getFileMetadata(token: string, id: string): Promise<DriveFileMetadata> {
   const fields = 'id,name,mimeType,fileExtension,size,modifiedTime';
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=${fields}`, {
-    headers: { 'Authorization': `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error('DriveRead could not access the selected Google Drive file.');
-  return res.json();
+  let res: Response;
+  try { res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=${fields}`, { headers: { 'Authorization': `Bearer ${token}` } }); }
+  catch { throw new DriveError('network', 'Google Drive could not be reached. Check your connection and try again.'); }
+  if (!res.ok) throw responseError(res.status);
+  try { return await res.json(); } catch { throw new DriveError('invalid-response', 'Google Drive returned invalid file information. Try opening the book again.'); }
 }
 
 export async function downloadEpub(
@@ -31,16 +44,15 @@ export async function downloadEpub(
   onMetadata?.(metadata);
   const hasEpubExtension = metadata.fileExtension?.toLowerCase() === 'epub' || metadata.name.toLowerCase().endsWith('.epub');
   if (metadata.mimeType !== 'application/epub+zip' && !hasEpubExtension) {
-    throw new Error(`“${metadata.name}” is not an EPUB file. Choose an .epub book in Google Drive.`);
+    throw new DriveError('invalid-response', `“${metadata.name}” is not an EPUB file. Choose an .epub book in Google Drive.`);
   }
   if (isDebug) console.log(`downloadEpub: downloading file ${id}`);
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
+  let res: Response;
+  try { res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`, { headers: { 'Authorization': `Bearer ${token}` } }); }
+  catch { throw new DriveError('network', 'The book download was interrupted. Check your connection and try again.'); }
   if (!res.ok) {
-    const errorText = await res.text();
-    if (isDebug) console.error(`downloadEpub: failed to download file ${id}`, errorText);
-    throw new Error(errorText);
+    if (isDebug) console.error(`downloadEpub: failed to download file ${id} (${res.status})`);
+    throw responseError(res.status);
   }
   const buffer = await res.arrayBuffer();
   if (isDebug) console.log(`downloadEpub: downloaded file ${id}, size: ${buffer.byteLength} bytes`);
