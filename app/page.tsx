@@ -39,6 +39,7 @@ export default function Home() {
   const [progress, setProgress] = useState<Progress>({});
   const [sortBy, setSortBy] = useState<'modifiedTime' | 'name'>('modifiedTime');
   const [filter, setFilter] = useState('');
+  const [pendingDriveFileId, setPendingDriveFileId] = useState<string | null>(null);
 
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<Controls | null>(null);
@@ -87,6 +88,34 @@ export default function Home() {
     return filtered;
   }, [files, sortBy, filter]);
 
+  // Handle files launched from Google Drive via "Open with DriveRead"
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const stateParam = params.get('state');
+
+  if (!stateParam) return;
+
+  try {
+    const driveState = JSON.parse(stateParam);
+
+    if (
+      driveState?.action === 'open' &&
+      Array.isArray(driveState?.ids) &&
+      driveState.ids.length > 0
+    ) {
+      const id = driveState.ids[0];
+
+      if (isDebug) {
+        console.log('DriveRead launched from Google Drive:', id);
+      }
+
+      setPendingDriveFileId(id);
+    }
+  } catch (e) {
+    console.error('Unable to parse Google Drive launch state:', e);
+  }
+}, []);
+  
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (settingsMenuRef.current && !settingsMenuRef.current.contains(event.target as Node)) {
@@ -169,6 +198,16 @@ export default function Home() {
     }
   }
 
+// Open a file supplied by Google Drive once authentication is available
+useEffect(() => {
+  if (!token || !pendingDriveFileId) return;
+
+  const id = pendingDriveFileId;
+  setPendingDriveFileId(null);
+
+  openFile(id);
+}, [token, pendingDriveFileId]);
+  
   // persist settings when changed
   useEffect(() => { saveSettings(settings); }, [settings]);
 
