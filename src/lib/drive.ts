@@ -2,94 +2,49 @@
 
 import type { Progress } from './progress';
 
-type FolderInfo = {
-  name: string;
-  parent?: string;
-};
-
-type DriveFileResource = {
+export type DriveFileMetadata = {
   id: string;
   name: string;
+  mimeType: string;
+  fileExtension?: string;
   modifiedTime: string;
-  parents?: string[];
-  size: string;
-  iconLink: string;
-};
-
-type DriveFolderResource = {
-  id: string;
-  name: string;
-  parents?: string[];
+  size?: string;
 };
 
 const isDebug = typeof window !== 'undefined' && window.location.search.includes('debug=true');
 
-export async function listEpubs(token: string) {
-  if (isDebug) console.log('listEpubs: fetching epubs...');
-  const epubParams = new URLSearchParams({
-    q: "fileExtension='epub' and trashed=false",
-    fields: 'files(id,name,modifiedTime,parents,size,iconLink)',
-    pageSize: '1000',
-    orderBy: 'modifiedTime desc',
+export async function getFileMetadata(token: string, id: string): Promise<DriveFileMetadata> {
+  const fields = 'id,name,mimeType,fileExtension,size,modifiedTime';
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=${fields}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
   });
-  const epubRes = await fetch(`https://www.googleapis.com/drive/v3/files?${epubParams.toString()}`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  if (!epubRes.ok) throw new Error(await epubRes.text());
-  const epubData: { files: DriveFileResource[] } = await epubRes.json();
-  if (isDebug) console.log('listEpubs: received epub data', epubData);
-
-  if (isDebug) console.log('listEpubs: fetching folders...');
-  const folderParams = new URLSearchParams({
-    q: "mimeType='application/vnd.google-apps.folder' and trashed=false",
-    fields: 'files(id,name,parents)',
-    pageSize: '1000',
-  });
-  const folderRes = await fetch(`https://www.googleapis.com/drive/v3/files?${folderParams.toString()}`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  if (!folderRes.ok) throw new Error(await folderRes.text());
-  const folderData: { files: DriveFolderResource[] } = await folderRes.json();
-  if (isDebug) console.log('listEpubs: received folder data', folderData);
-
-  const folders = new Map<string, FolderInfo>(
-    folderData.files.map((f) => [f.id, { name: f.name, parent: f.parents?.[0] }]),
-  );
-
-  function getPath(folderId?: string): string {
-    const pathParts: string[] = [];
-    let currentFolderId = folderId;
-    while (currentFolderId && folders.has(currentFolderId)) {
-      const folder = folders.get(currentFolderId)!;
-      pathParts.unshift(folder.name);
-      currentFolderId = folder.parent;
-    }
-    return pathParts.length > 0 ? '/' + pathParts.join('/') : '';
-  }
-
-  const filesWithPaths = epubData.files.map((f) => ({
-    ...f,
-    path: getPath(f.parents?.[0]),
-  }));
-
-  if (isDebug) console.log('listEpubs: processed files with paths', filesWithPaths);
-
-  return { files: filesWithPaths };
+  if (!res.ok) throw new Error('DriveRead could not access the selected Google Drive file.');
+  return res.json();
 }
 
-export async function downloadArrayBuffer(token: string, id: string) {
-  if (isDebug) console.log(`downloadArrayBuffer: downloading file ${id}`);
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, {
+export async function downloadEpub(
+  token: string,
+  id: string,
+  onMetadata?: (metadata: DriveFileMetadata) => void,
+) {
+  const metadata = await getFileMetadata(token, id);
+  onMetadata?.(metadata);
+  const hasEpubExtension = metadata.fileExtension?.toLowerCase() === 'epub' || metadata.name.toLowerCase().endsWith('.epub');
+  if (metadata.mimeType !== 'application/epub+zip' && !hasEpubExtension) {
+    throw new Error(`“${metadata.name}” is not an EPUB file. Choose an .epub book in Google Drive.`);
+  }
+  if (isDebug) console.log(`downloadEpub: downloading file ${id}`);
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   if (!res.ok) {
     const errorText = await res.text();
-    if (isDebug) console.error(`downloadArrayBuffer: failed to download file ${id}`, errorText);
+    if (isDebug) console.error(`downloadEpub: failed to download file ${id}`, errorText);
     throw new Error(errorText);
   }
   const buffer = await res.arrayBuffer();
-  if (isDebug) console.log(`downloadArrayBuffer: downloaded file ${id}, size: ${buffer.byteLength} bytes`);
-  return buffer;
+  if (isDebug) console.log(`downloadEpub: downloaded file ${id}, size: ${buffer.byteLength} bytes`);
+  return { metadata, buffer };
 }
 
 const PROGRESS_FILE_NAME = 'progress.json';
