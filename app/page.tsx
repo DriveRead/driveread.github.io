@@ -1,9 +1,10 @@
 'use client';
 import Script from 'next/script';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { useGoogleToken } from '@/src/hooks/useGoogleToken';
-import { downloadEpub, loadRemoteProgress, saveRemoteProgress, type DriveFileMetadata } from '@/src/lib/drive';
+import { downloadEpub, DriveError, loadRemoteProgress, saveRemoteProgress, type DriveFileMetadata } from '@/src/lib/drive';
 import { parseDriveLaunchState, type DriveLaunchState } from '@/src/lib/driveLaunch';
+import { launchLifecycleReducer, type LaunchErrorKind, type LaunchLifecycle } from '@/src/lib/launchLifecycle';
 import { loadSettings, saveSettings } from '@/src/lib/settings';
 import { loadAllLocalProgress, saveAllLocalProgress, mergeProgress, type Progress } from '@/src/lib/progress';
 import type { Settings } from '@/src/lib/settings';
@@ -14,23 +15,22 @@ const isDebug = typeof window !== 'undefined' && window.location.search.includes
 type Controls = { goTo: (t: string) => Promise<void>; next: () => Promise<void>; prev: () => Promise<void> };
 
 export default function Home() {
-  const { token, ready, request } = useGoogleToken();
+  const auth = useGoogleToken();
+  const { token } = auth;
   const [bytes, setBytes] = useState<ArrayBuffer | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
   const [cfi, setCfi] = useState<string | undefined>();
   const [currentHref, setCurrentHref] = useState<string | null>(null);
   const [toc, setToc] = useState<Array<{ href: string; label: string }>>([]);
   const [settings, setSettings] = useState<Settings>({ theme: 'light', fontScale: 1.0, lineHeight: 1.5, fontFamily: 'os' });
-  const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<number | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [percent, setPercent] = useState<number | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<Progress>({});
   const [launch, setLaunch] = useState<DriveLaunchState>({ status: 'missing' });
-  const [pendingDriveFileId, setPendingDriveFileId] = useState<string | null>(null);
+  const [lifecycle, dispatchLifecycle] = useReducer(launchLifecycleReducer, { status: 'no-launch' } as LaunchLifecycle);
   const [selectedFile, setSelectedFile] = useState<DriveFileMetadata | null>(null);
 
   const saveTimer = useRef<number | null>(null);
@@ -72,20 +72,31 @@ export default function Home() {
     const parsed = parseDriveLaunchState(new URLSearchParams(window.location.search).get('state'));
     setLaunch(parsed);
     if (parsed.status === 'valid') {
-      setPendingDriveFileId(parsed.fileId);
+      dispatchLifecycle({ type: 'VALID_LAUNCH', fileId: parsed.fileId });
+    } else if (parsed.status === 'invalid') {
+      dispatchLifecycle({ type: 'INVALID_LAUNCH', message: parsed.message });
+    } else {
+      dispatchLifecycle({ type: 'DIRECT_VISIT' });
     }
   }, []);
 
   // Automatically sign in when launched from Google Drive
 useEffect(() => {
   if (
-    pendingDriveFileId &&
-    !token &&
-    ready
+    lifecycle.status === 'awaiting-authentication' && auth.status === 'ready'
   ) {
-    request();
+    dispatchLifecycle({ type: 'REQUEST_ACCESS' });
+    auth.request();
   }
-}, [pendingDriveFileId, token, ready, request]);
+// The hook exposes stable callbacks; depending on the whole discriminated object would retrigger requests.
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [lifecycle.status, auth.status, auth.request]);
+
+  useEffect(() => {
+    if (auth.status !== 'error' || lifecycle.status === 'recoverable-error' || !('fileId' in lifecycle)) return;
+    const kind: LaunchErrorKind = auth.error.kind === 'configuration' ? 'configuration' : auth.error.kind === 'permission-denied' ? 'permission-denied' : 'authentication';
+    dispatchLifecycle({ type: 'ERROR', kind, message: auth.error.message, retry: 'authenticate' });
+  }, [auth.status, auth.error, lifecycle]);
 
 
   useEffect(() => {
@@ -136,7 +147,7 @@ useEffect(() => {
   async function openFile(id: string) {
     if (!token) return;
     if (isDebug) console.log(`page.tsx: Opening file with id: ${id}`);
-    setLoading(true);
+    dispatchLifecycle({ type: 'AUTHENTICATED' });
     setBytes(null);
     setFileId(null);
     setCfi(undefined);
@@ -144,32 +155,46 @@ useEffect(() => {
     setPage(null);
     setTotal(null);
     setPercent(null);
-    setError(null);
     try {
-      const { metadata, buffer } = await downloadEpub(token, id, setSelectedFile);
+      const { metadata, buffer } = await downloadEpub(token, id, metadata => {
+        setSelectedFile(metadata);
+        dispatchLifecycle({ type: 'METADATA_LOADED' });
+      });
       setSelectedFile(metadata);
       if (isDebug) console.log(`page.tsx: File ${id} downloaded, buffer size: ${buffer.byteLength}`);
       setFileId(id);
       setBytes(buffer);
       setCfi(progress[id]?.cfi);
-    } catch (e: any) {
+      dispatchLifecycle({ type: 'OPENED' });
+    } catch (e: unknown) {
       if (isDebug) console.error(`page.tsx: Error opening file ${id}:`, e);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (isDebug) console.log(`page.tsx: Finished opening file ${id}`);
-      setLoading(false);
+      const driveError = e instanceof DriveError ? e : null;
+      const kind: LaunchErrorKind = driveError?.code === 'unauthorized' ? 'authentication'
+        : driveError?.code === 'permission-denied' ? 'permission-denied'
+        : driveError?.code === 'missing-file' ? 'missing-file'
+        : driveError?.code === 'invalid-response' ? 'invalid-file' : 'network';
+      dispatchLifecycle({ type: 'ERROR', kind, message: driveError?.message || 'The book could not be opened. Please try the download again.', retry: driveError?.code === 'unauthorized' ? 'authenticate' : 'download' });
+      if (driveError?.code === 'unauthorized') auth.clearToken();
     }
   }
 
 // Open a file supplied by Google Drive once authentication is available
 useEffect(() => {
-  if (!token || !pendingDriveFileId) return;
+  if (!token || lifecycle.status !== 'requesting-access') return;
+  openFile(lifecycle.fileId);
+// openFile intentionally runs once for each transition into requesting-access.
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [token, lifecycle.status]);
 
-  const id = pendingDriveFileId;
-  setPendingDriveFileId(null);
-
-  openFile(id);
-}, [token, pendingDriveFileId]);
+  function retryLaunch() {
+    if (lifecycle.status !== 'recoverable-error' || !lifecycle.fileId) return;
+    if (lifecycle.retry === 'authenticate') {
+      dispatchLifecycle({ type: 'REQUEST_ACCESS' });
+      auth.retry();
+    } else {
+      openFile(lifecycle.fileId);
+    }
+  }
   
   // persist settings when changed
   useEffect(() => { saveSettings(settings); }, [settings]);
@@ -199,7 +224,7 @@ useEffect(() => {
 
   return (
     <>
-      <Script src="https://accounts.google.com/gsi/client" async defer />
+      <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={auth.scriptLoaded} onError={auth.scriptFailed} />
 
       {!focusMode && (
         <header style={{
@@ -331,12 +356,6 @@ useEffect(() => {
               )}
             </div>
 
-            {/* Sign in */}
-            {!token && (
-              <button role="menuitem" onClick={request} disabled={!ready} style={{ padding:'6px 10px' }}>
-                Sign in with Google
-              </button>
-            )}
           </nav>
 
 
@@ -379,9 +398,9 @@ useEffect(() => {
         <main style={{ border:'1px solid #ddd', borderRadius:8, height:'100%', overflow:'hidden',
           position:'relative',
           background: settings.theme === 'dark' ? '#0b0f12' : '#fff' }}>
-          {loading ? (
+          {['requesting-access', 'fetching-metadata', 'downloading'].includes(lifecycle.status) ? (
             <div role="status" style={{ height:'100%', display:'grid', placeItems:'center', color:'#6b7280', padding:32, textAlign:'center' }}>
-              <div><strong style={{ display:'block', color:'#111827', marginBottom:8 }}>Downloading {selectedFile?.name || 'your selected book'}…</strong>DriveRead is securely fetching it from Google Drive.</div>
+              <div><strong style={{ display:'block', color:'#111827', marginBottom:8 }}>{lifecycle.status === 'requesting-access' ? 'Requesting Google Drive access…' : lifecycle.status === 'fetching-metadata' ? 'Checking the selected book…' : `Downloading ${selectedFile?.name || 'your selected book'}…`}</strong>Please keep this page open.</div>
             </div>
           ) : bytes ? (
             <>
@@ -428,11 +447,12 @@ useEffect(() => {
               <section style={{ width:'min(620px, 100%)', background:'#fff', border:'1px solid #e2e8f0', borderRadius:20, padding:'clamp(24px, 5vw, 48px)', boxShadow:'0 18px 50px rgba(30, 41, 59, .10)' }}>
                 <div style={{ color:'#4f46e5', fontWeight:700, letterSpacing:'.08em', fontSize:12, textTransform:'uppercase' }}>Your books, distraction-free</div>
                 <h2 style={{ margin:'10px 0 12px', fontSize:'clamp(28px, 5vw, 40px)', lineHeight:1.1 }}>Read an EPUB from Google Drive</h2>
-                {error || launch.status === 'invalid' ? (
+                {lifecycle.status === 'recoverable-error' ? (
                   <div role="alert" style={{ margin:'20px 0', padding:16, borderRadius:10, background:'#fef2f2', color:'#991b1b' }}>
-                    <strong>We couldn’t open this book.</strong><div style={{ marginTop:5 }}>{error || (launch.status === 'invalid' && launch.message)}</div>
+                    <strong>We couldn’t open this book.</strong><div style={{ marginTop:5 }}>{lifecycle.message}</div>
+                    {lifecycle.fileId && <button type="button" onClick={retryLaunch} style={{ marginTop:12 }}>{lifecycle.retry === 'authenticate' ? 'Authenticate again' : 'Try download again'}</button>}
                   </div>
-                ) : launch.status === 'valid' && !token ? (
+                ) : lifecycle.status === 'awaiting-authentication' || lifecycle.status === 'requesting-access' ? (
                   <div role="status" style={{ margin:'20px 0', padding:16, borderRadius:10, background:'#eef2ff', color:'#3730a3' }}>
                     <strong>Waiting for Google authentication…</strong><div style={{ marginTop:5 }}>Sign in when prompted so DriveRead can access the selected book.</div>
                   </div>
