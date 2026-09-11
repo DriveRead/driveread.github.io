@@ -29,3 +29,9 @@ test('every configured reader font exists at its deployed public path', () => {
     assert.equal(existsSync(resolve('public', assetPath)), true, `missing public/${assetPath}`);
   }
 });
+
+test('container reflow resizes at and restores the current CFI', () => {
+  assert.match(readerSource, /new ResizeObserver/);
+  assert.match(readerSource, /rendition\?\.resize\?\./);
+  assert.match(readerSource, /if \(currentCfi\) rendition\.display\(currentCfi\)/);
+});

@@ -1,5 +1,7 @@
 export const SETTINGS_KEY = 'driveread.settings.v1';
-export const SETTINGS_VERSION = 2 as const;
+export const SETTINGS_VERSION = 3 as const;
+export const CONTEXTUAL_PANELS = ['settings', 'contents', 'bookmarks', 'book-info'] as const;
+export type ContextualPanelId = typeof CONTEXTUAL_PANELS[number];
 
 export const THEMES = ['system', 'light', 'sepia', 'dark'] as const;
 export const FONT_FAMILIES = ['os', 'serif', 'sans', 'opendyslexic', 'atkinson', 'roboto', 'robotomono'] as const;
@@ -27,6 +29,9 @@ export interface Settings {
   flow: Flow;
   spread: SpreadMode;
   reducedMotion: boolean | null;
+  /** Desktop panel preference. Closing clears these; unpinning only sets panelPinned false. */
+  panelPinned: boolean;
+  lastPinnedPanel: ContextualPanelId | null;
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
@@ -43,6 +48,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   flow: 'paginated',
   spread: 'auto',
   reducedMotion: null,
+  panelPinned: false,
+  lastPinnedPanel: null,
 });
 
 export type SettingsSection = 'appearance' | 'typography' | 'layout' | 'navigation';
@@ -79,6 +86,9 @@ export function normalizeSettings(value: unknown): Settings {
     spread: enumValue(source.spread, SPREAD_MODES, DEFAULT_SETTINGS.spread),
     reducedMotion: typeof source.reducedMotion === 'boolean' || source.reducedMotion === null
       ? source.reducedMotion : DEFAULT_SETTINGS.reducedMotion,
+    panelPinned: typeof source.panelPinned === 'boolean' ? source.panelPinned : DEFAULT_SETTINGS.panelPinned,
+    lastPinnedPanel: source.lastPinnedPanel === null ? null
+      : enumValue(source.lastPinnedPanel, CONTEXTUAL_PANELS, DEFAULT_SETTINGS.lastPinnedPanel as ContextualPanelId) || null,
   };
 }
 
