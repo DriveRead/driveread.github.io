@@ -115,6 +115,21 @@ useEffect(() => {
     console.error('Unable to parse Google Drive launch state:', e);
   }
 }, []);
+
+// Automatically sign in when launched from Google Drive
+useEffect(() => {
+  if (
+    pendingDriveFileId &&
+    !token &&
+    ready
+  ) {
+    request();
+  }
+}, [pendingDriveFileId, token, ready, request]);
+
+// Your existing handleClickOutside effect follows...
+useEffect(() => {
+  function handleClickOutside(event: MouseEvent) {
   
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
