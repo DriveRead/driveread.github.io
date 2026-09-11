@@ -1,20 +1,24 @@
 'use client';
-import type { ChangeEvent } from 'react';
+import { type ChangeEvent, type RefObject, useRef } from 'react';
+import { useDialogFocus } from '@/src/components/useDialogFocus';
 import {
   DEFAULT_SETTINGS, FONT_FAMILIES, FLOWS, SPREAD_MODES, THEMES,
   resetSection, resetSettings, updateSetting,
   type FontFamily, type Flow, type Settings, type SettingsSection, type SpreadMode, type Theme,
 } from '@/src/lib/settings';
 
-type Props = { settings: Settings; onChange: (settings: Settings) => void; onClose: () => void; onFocusMode: () => void; canFocus: boolean };
+type Props = { open: boolean; settings: Settings; onChange: (settings: Settings) => void; onClose: () => void; onFocusMode: () => void; canFocus: boolean; returnFocusRef: RefObject<HTMLElement> };
 const fontNames: Record<FontFamily, string> = { os: 'OS default', serif: 'Serif', sans: 'Sans', opendyslexic: 'Open Dyslexic', atkinson: 'Atkinson Hyperlegible', roboto: 'Roboto', robotomono: 'Roboto Mono' };
 
-export default function SettingsPanel({ settings, onChange, onClose, onFocusMode, canFocus }: Props) {
+export default function SettingsPanel({ open, settings, onChange, onClose, onFocusMode, canFocus, returnFocusRef }: Props) {
+  const panelRef = useRef<HTMLElement>(null);
+  useDialogFocus(open, panelRef, onClose, returnFocusRef);
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => onChange(updateSetting(settings, key, value));
   const range = (key: 'fontSize' | 'lineHeight' | 'contentWidth' | 'pageMargins' | 'paragraphSpacing') =>
     (event: ChangeEvent<HTMLInputElement>) => set(key, Number(event.target.value));
   const reset = (section: SettingsSection) => onChange(resetSection(settings, section));
-  return <div className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  if (!open) return null;
+  return <><button className="sheet-backdrop" tabIndex={-1} aria-label="Close settings" onClick={onClose} /><aside ref={panelRef} className="side-sheet sheet-right settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <header className="settings-heading"><h2 id="settings-title">Reading settings</h2><button onClick={onClose} aria-label="Close settings">✕</button></header>
     <section><SectionTitle title="Appearance" onReset={() => reset('appearance')} />
       <fieldset><legend>Theme</legend><div className="choice-row">{THEMES.map(theme => <label key={theme}><input type="radio" name="theme" checked={settings.theme === theme} onChange={() => set('theme', theme as Theme)} /> {theme[0].toUpperCase() + theme.slice(1)}</label>)}</div></fieldset>
@@ -37,9 +41,9 @@ export default function SettingsPanel({ settings, onChange, onClose, onFocusMode
       <label className="control-row"><span>Spread mode</span><select value={settings.spread} onChange={e => set('spread', e.target.value as SpreadMode)}>{SPREAD_MODES.map(v => <option value={v} key={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}</select></label>
       <button onClick={onFocusMode} disabled={!canFocus}>Enter focus mode</button>
     </section>
-    <div className="settings-preview" aria-label="Live settings preview" style={{ fontFamily: fontNames[settings.fontFamily], fontSize: `${settings.fontSize}%`, lineHeight: settings.lineHeight, textAlign: settings.textAlignment === 'start' ? 'start' : 'justify' }}><strong>Live preview</strong><p style={{ marginBlockEnd: `${settings.paragraphSpacing}em` }}>A comfortable page keeps the story in focus.</p></div>
+    <div className={`settings-preview preview-${settings.fontFamily}`} aria-label="Settings preview"><strong>Preview</strong><p>A comfortable page keeps the story in focus.</p></div>
     <footer><button className="danger-button" onClick={() => onChange(resetSettings())} disabled={JSON.stringify(settings) === JSON.stringify(DEFAULT_SETTINGS)}>Reset all</button></footer>
-  </div>;
+  </aside></>;
 }
 
 function SectionTitle({ title, onReset }: { title: string; onReset: () => void }) { return <div className="section-title"><h3>{title}</h3><button onClick={onReset}>Reset section</button></div>; }

@@ -10,6 +10,10 @@ import { loadAllLocalProgress, saveAllLocalProgress, mergeProgress, type Progres
 import type { Settings } from '@/src/lib/settings';
 import Reader from '@/src/components/Reader';
 import SettingsPanel from '@/src/components/settings/SettingsPanel';
+import AppShell from '@/src/components/AppShell';
+import LaunchScreen from '@/src/components/LaunchScreen';
+import ReaderToolbar from '@/src/components/ReaderToolbar';
+import ContentsPanel from '@/src/components/ContentsPanel';
 
 const isDebug = typeof window !== 'undefined' && window.location.search.includes('debug=true');
 
@@ -29,6 +33,7 @@ export default function Home() {
   const [percent, setPercent] = useState<number | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tocOpen, setTocOpen] = useState(false);
   const [progress, setProgress] = useState<Progress>({});
   const [launch, setLaunch] = useState<DriveLaunchState>({ status: 'missing' });
   const [lifecycle, dispatchLifecycle] = useReducer(launchLifecycleReducer, { status: 'no-launch' } as LaunchLifecycle);
@@ -36,7 +41,8 @@ export default function Home() {
 
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<Controls | null>(null);
-  const settingsMenuRef = useRef<HTMLDivElement>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const contentsButtonRef = useRef<HTMLButtonElement>(null);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
 
   function goToPrevChapter() {
@@ -100,16 +106,6 @@ useEffect(() => {
     dispatchLifecycle({ type: 'ERROR', kind, message: auth.error.message, retry: 'authenticate' });
   }, [auth.status, auth.error, lifecycle]);
 
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (settingsMenuRef.current && !settingsMenuRef.current.contains(event.target as Node)) {
-        setSettingsOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -225,128 +221,19 @@ useEffect(() => {
     return () => window.removeEventListener('keydown', onKey);
   }, [focusMode]);
 
+  const currentChapter = currentHref ? toc.find(item => item.href.split('#')[0] === currentHref.split('#')[0])?.label : undefined;
+  const loading = ['requesting-access', 'fetching-metadata', 'downloading'].includes(lifecycle.status);
+
   return (
-    <div className={`app-shell theme-${settings.theme}`} data-theme={settings.theme}>
+    <AppShell theme={settings.theme}>
       <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={auth.scriptLoaded} onError={auth.scriptFailed} />
-
       {!focusMode && (
-        <header style={{
-            display:'flex', gap:12, alignItems:'center', padding:12,
-            borderBottom:'1px solid #e5e5e5', position:'sticky', top:0,
-            background:'#fff', zIndex:10
-          }}>
-          <div style={{ minWidth: 0 }}><h1 style={{ margin:0, fontSize:18 }}>DriveRead</h1>{selectedFile && <div title={selectedFile.name} style={{ color:'#6b7280', fontSize:12, maxWidth:300, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{selectedFile.name}</div>}</div>
-          <nav role="menubar" style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
-            {/* Page navigation buttons */}
-            <button
-              role="menuitem"
-              type="button"
-              aria-label="Previous page"
-              onClick={() => controlsRef.current?.prev()}
-              disabled={!bytes || settings.flow === 'scrolled-doc'}
-              title="Previous (←)"
-            >
-              ◀ Prev
-            </button>
-            <button
-              role="menuitem"
-              type="button"
-              aria-label="Next page"
-              onClick={() => controlsRef.current?.next()}
-              disabled={!bytes || settings.flow === 'scrolled-doc'}
-              title="Next (→)"
-            >
-              Next ▶
-            </button>
-
-            {/* Chapter navigation buttons (work in all modes) */}
-            <button
-              role="menuitem"
-              type="button"
-              aria-label="Previous chapter"
-              onClick={goToPrevChapter}
-              disabled={!bytes || toc.length === 0 || !currentHref}
-              title="Previous chapter"
-            >
-              Prev Chapter
-            </button>
-            <button
-              role="menuitem"
-              type="button"
-              aria-label="Next chapter"
-              onClick={goToNextChapter}
-              disabled={!bytes || toc.length === 0 || !currentHref}
-              title="Next chapter"
-            >
-              Next Chapter
-            </button>
-
-            {/* Settings Menu */}
-            <div style={{ position: 'relative' }} ref={settingsMenuRef}>
-              <button
-                role="menuitem"
-                type="button"
-                aria-haspopup="dialog"
-                aria-expanded={settingsOpen}
-                onClick={() => setSettingsOpen(o => !o)}
-              >
-                Settings
-              </button>
-              {settingsOpen && <SettingsPanel
-                settings={settings}
-                onChange={setSettings}
-                onClose={() => setSettingsOpen(false)}
-                canFocus={Boolean(bytes)}
-                onFocusMode={() => { setFocusMode(true); setSettingsOpen(false); }}
-              />}
-            </div>
-
-          </nav>
-
-
-          <div style={{ display:'flex', gap:8, alignItems:'center', minWidth:140, justifyContent:'flex-end' }}>
-            {settings.flow === 'paginated' && (
-              <span style={{ color:'#6b7280' }}>
-                {page && total ? `Page ${page} / ${total}` : '—'}
-              </span>
-            )}
-            <span style={{ color:'#6b7280' }}>
-              {percent !== null ? `${percent}%` : ''}
-            </span>
-          </div>
-        </header>
+        <ReaderToolbar bookTitle={selectedFile?.name} chapterTitle={currentChapter} hasBook={Boolean(bytes)} paginated={settings.flow === 'paginated'} page={page} total={total} percent={percent} tocOpen={tocOpen} settingsOpen={settingsOpen} onContents={() => setTocOpen(true)} onSettings={() => setSettingsOpen(true)} onPrev={() => controlsRef.current?.prev()} onNext={() => controlsRef.current?.next()} onFocus={() => setFocusMode(true)} settingsButtonRef={settingsButtonRef} contentsButtonRef={contentsButtonRef} />
       )}
-      <div
-        style={{
-          display:'grid',
-          gridTemplateColumns: focusMode ? '1fr' : '280px minmax(0, 1fr)',
-          gap:16,
-          padding:16,
-          height:'calc(100vh - 58px)'
-        }}
-      >
-        {/* TOC */}
-        {!focusMode && (
-        <aside style={{ overflow:'auto', border:'1px solid #ddd', borderRadius:8, padding:8 }}>
-          <h3 style={{ marginTop:0 }}>Contents</h3>
-          {toc.length === 0 && <p style={{ color:'#888' }}>—</p>}
-          {toc.map(item => (
-            <button key={item.href}
-              onClick={() => controlsRef.current?.goTo(item.href)}
-              style={{ display:'block', width:'100%', textAlign:'left', padding:'6px 8px', borderRadius:6, border:'1px solid #eee', marginBottom:6 }}>
-              {item.label}
-            </button>
-          ))}
-        </aside>
-        )}
-        {/* Reader */}
-        <main style={{ border:'1px solid #ddd', borderRadius:8, height:'100%', overflow:'hidden',
-          position:'relative',
-          background: settings.theme === 'dark' ? '#0b0f12' : settings.theme === 'sepia' ? '#f4ecd8' : '#fff' }}>
-          {['requesting-access', 'fetching-metadata', 'downloading'].includes(lifecycle.status) ? (
-            <div role="status" style={{ height:'100%', display:'grid', placeItems:'center', color:'#6b7280', padding:32, textAlign:'center' }}>
-              <div><strong style={{ display:'block', color:'#111827', marginBottom:8 }}>{lifecycle.status === 'requesting-access' ? 'Requesting Google Drive access…' : lifecycle.status === 'fetching-metadata' ? 'Checking the selected book…' : `Downloading ${selectedFile?.name || 'your selected book'}…`}</strong>Please keep this page open.</div>
-            </div>
+      <div className={`reader-workspace${focusMode ? ' is-focus-mode' : ''}`}>
+        <main className="reader-surface">
+          {loading ? (
+            <div role="status" aria-live="polite" className="loading-state"><div><strong>{lifecycle.status === 'requesting-access' ? 'Requesting Google Drive access…' : lifecycle.status === 'fetching-metadata' ? 'Checking the selected book…' : `Downloading ${selectedFile?.name || 'your selected book'}…`}</strong><span>Please keep this page open.</span></div></div>
           ) : bytes ? (
             <>
               <Reader
@@ -373,45 +260,15 @@ useEffect(() => {
                 onToc={setToc}
                 onReady={(c) => { controlsRef.current = c; }}
               />
-              <div style={{ position:'absolute', bottom:10, right:10, display:'flex', gap:8 }}>
-                {focusMode && (
-                  <>
-                    <button onClick={goToPrevChapter} disabled={!bytes || toc.length === 0 || !currentHref} title="Previous chapter">Prev Chapter</button>
-                    <button onClick={goToNextChapter} disabled={!bytes || toc.length === 0 || !currentHref} title="Next chapter">Next Chapter</button>
-                    <button onClick={() => setFocusMode(false)} title="Exit focus mode (Esc)">Exit Focus</button>
-                  </>
-                )}
-              </div>
+              {focusMode && <nav className="focus-controls" aria-label="Distraction-free reading controls"><button onClick={goToPrevChapter} disabled={!currentHref} aria-label="Previous chapter">← <span>Chapter</span></button><div className="focus-progress"><strong>{currentChapter || selectedFile?.name}</strong><span>{percent !== null ? `${percent}%` : ''}</span></div><button onClick={goToNextChapter} disabled={!currentHref} aria-label="Next chapter"><span>Chapter</span> →</button><button className="exit-focus" onClick={() => setFocusMode(false)} title="Exit distraction-free mode (Escape)">Exit focus <span aria-hidden="true">×</span></button></nav>}
             </>
           ) : (
-            <div style={{ height:'100%', overflow:'auto', display:'grid', placeItems:'center', padding:'48px 24px', background:'linear-gradient(145deg, #f8fafc, #eef2ff)' }}>
-              <section style={{ width:'min(620px, 100%)', background:'#fff', border:'1px solid #e2e8f0', borderRadius:20, padding:'clamp(24px, 5vw, 48px)', boxShadow:'0 18px 50px rgba(30, 41, 59, .10)' }}>
-                <div style={{ color:'#4f46e5', fontWeight:700, letterSpacing:'.08em', fontSize:12, textTransform:'uppercase' }}>Your books, distraction-free</div>
-                <h2 style={{ margin:'10px 0 12px', fontSize:'clamp(28px, 5vw, 40px)', lineHeight:1.1 }}>Read an EPUB from Google Drive</h2>
-                {lifecycle.status === 'recoverable-error' ? (
-                  <div role="alert" style={{ margin:'20px 0', padding:16, borderRadius:10, background:'#fef2f2', color:'#991b1b' }}>
-                    <strong>We couldn’t open this book.</strong><div style={{ marginTop:5 }}>{lifecycle.message}</div>
-                    {lifecycle.fileId && <button type="button" onClick={retryLaunch} style={{ marginTop:12 }}>{lifecycle.retry === 'authenticate' ? 'Authenticate again' : 'Try download again'}</button>}
-                  </div>
-                ) : lifecycle.status === 'awaiting-authentication' || lifecycle.status === 'requesting-access' ? (
-                  <div role="status" style={{ margin:'20px 0', padding:16, borderRadius:10, background:'#eef2ff', color:'#3730a3' }}>
-                    <strong>Waiting for Google authentication…</strong><div style={{ marginTop:5 }}>Sign in when prompted so DriveRead can access the selected book.</div>
-                  </div>
-                ) : (
-                  <p style={{ color:'#475569', fontSize:17, lineHeight:1.6 }}>DriveRead opens only the book you choose. Start in Drive, then send one EPUB here with <strong>Open with</strong>.</p>
-                )}
-                <a href="https://drive.google.com/drive/my-drive" target="_blank" rel="noreferrer" style={{ display:'inline-block', margin:'12px 0 28px', padding:'12px 18px', borderRadius:9, background:'#4f46e5', color:'#fff', textDecoration:'none', fontWeight:700 }}>Open Google Drive ↗</a>
-                <ol style={{ margin:0, paddingLeft:22, color:'#334155', lineHeight:1.8 }}>
-                  <li>Find the EPUB you want to read in Google Drive.</li>
-                  <li>Right-click it and choose <strong>Open with</strong>.</li>
-                  <li>Select <strong>DriveRead</strong>; the book will open here.</li>
-                </ol>
-                {launch.status === 'missing' && <p style={{ margin:'24px 0 0', paddingTop:18, borderTop:'1px solid #e2e8f0', color:'#64748b', fontSize:14 }}>You visited DriveRead directly, so no file was selected. Choose one in Google Drive using the steps above.</p>}
-              </section>
-            </div>
+            <LaunchScreen launch={launch} lifecycle={lifecycle} onRetry={retryLaunch} />
           )}
         </main>
       </div>
-    </div>
+      <ContentsPanel open={tocOpen} items={toc} currentHref={currentHref} onSelect={href => controlsRef.current?.goTo(href)} onClose={() => setTocOpen(false)} returnFocusRef={contentsButtonRef} />
+      <SettingsPanel open={settingsOpen} settings={settings} onChange={setSettings} onClose={() => setSettingsOpen(false)} canFocus={Boolean(bytes)} onFocusMode={() => { setFocusMode(true); setSettingsOpen(false); }} returnFocusRef={settingsButtonRef} />
+    </AppShell>
   );
 }
