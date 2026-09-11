@@ -4,7 +4,7 @@ import type { Settings } from '@/src/lib/settings';
 import type { TocItem } from './ContentsPanel';
 import { isEditableTarget } from '@/src/lib/readerNavigation';
 import { openExternalEpubLink, classifyEpubLink } from '@/src/lib/readerSecurity';
-import { publicAssetUrl, READER_FONT_ASSETS } from '@/src/lib/readerAssets';
+import { publicAssetUrl, readerFontStylesheet, READER_FONT_ASSETS } from '@/src/lib/readerAssets';
 
 export type ReaderControls = {
   goTo: (hrefOrCfi: string) => Promise<void>;
@@ -57,14 +57,39 @@ export default function Reader({
     rendition.themes.register('sepia', { body: { background: '#f4ecd8', color: '#433422' } });
     rendition.themes.register('dark', { body: { background: '#0b0f12', color: '#e7e7e7' } });
 
-    // Optional font faces (deployed from the root public/fonts directory)
-    try {
-      for (const [family, path] of READER_FONT_ASSETS) {
-        rendition.themes.registerFont(family, publicAssetUrl(path));
+    // A rendition content hook runs for every chapter, including views created
+    // after initialization. epub.js 0.3 supports addStylesheetCss, but does not
+    // provide the registerFont API found in some wrappers around the library.
+    const fontCss = readerFontStylesheet();
+    const injectReaderFonts = async (contents: any) => {
+      const warn = (family: string, url: string, error?: unknown) => {
+        const debug = process.env.NODE_ENV !== 'production' || window.location.search.includes('debug=true');
+        if (debug) console.warn(`Reader font could not be loaded: ${family} (${url})`, error);
+      };
+
+      try {
+        if (!contents.addStylesheetCss(fontCss, 'driveread-fonts')) {
+          for (const [family, path] of READER_FONT_ASSETS) warn(family, publicAssetUrl(path));
+          return;
+        }
+      } catch (error) {
+        for (const [family, path] of READER_FONT_ASSETS) warn(family, publicAssetUrl(path), error);
+        return;
       }
-    } catch {
-      // Safe to ignore if files aren’t present
-    }
+
+      const fonts: FontFaceSet | undefined = contents.document?.fonts;
+      if (!fonts?.load) return;
+      await Promise.all(READER_FONT_ASSETS.map(async ([family, path, weight]) => {
+        const url = publicAssetUrl(path);
+        try {
+          const loaded = await fonts.load(`${weight} 16px "${family}"`);
+          if (loaded.length === 0 || !fonts.check(`16px "${family}"`)) warn(family, url);
+        } catch (error) {
+          warn(family, url, error);
+        }
+      }));
+    };
+    rendition.hooks.content.register(injectReaderFonts);
 
     // Start location
     rendition.display(startCfi || undefined);
@@ -200,7 +225,7 @@ export default function Reader({
       : settings.fontFamily === 'roboto' ? 'Roboto, system-ui, sans-serif'
       : 'Roboto Mono, ui-monospace, monospace'; // robotomono
 
-    r.themes.override('font-family', cssFamily);
+    r.themes.font(cssFamily);
     r.themes.override('max-width', `${settings.contentWidth}px`);
     r.themes.override('margin-left', `${settings.pageMargins}px`);
     r.themes.override('margin-right', `${settings.pageMargins}px`);
@@ -212,7 +237,16 @@ export default function Reader({
     if (isFirstLayoutEffect.current) {
       isFirstLayoutEffect.current = false;
     } else if (cfi) {
-      r.display(cfi);
+      // Font loading changes pagination. Restore the logical position only
+      // after all currently rendered EPUB documents have finished reflowing.
+      let cancelled = false;
+      const restoreAfterFontsLoad = async () => {
+        const documents = (r.getContents?.() || []).map((content: any) => content.document as Document);
+        await Promise.all(documents.map((doc: Document) => doc.fonts?.ready ?? Promise.resolve()));
+        if (!cancelled && renditionRef.current === r) await r.display(cfi);
+      };
+      void restoreAfterFontsLoad();
+      return () => { cancelled = true; };
     }
   }, [settings.fontSize, settings.lineHeight, settings.fontFamily, settings.contentWidth, settings.pageMargins, settings.paragraphSpacing, settings.textAlignment, settings.hyphenation, settings.reducedMotion]);
 
