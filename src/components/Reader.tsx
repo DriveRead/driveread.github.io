@@ -5,6 +5,7 @@ import type { TocItem } from './ContentsPanel';
 import { isEditableTarget } from '@/src/lib/readerNavigation';
 import { openExternalEpubLink, classifyEpubLink } from '@/src/lib/readerSecurity';
 import { publicAssetUrl, readerFontStylesheet, READER_FONT_ASSETS } from '@/src/lib/readerAssets';
+import { isFindShortcut, normalizeSearchResult, wrappedResultIndex, type SearchResult } from '@/src/lib/readerSearch';
 
 export type ReaderControls = {
   goTo: (hrefOrCfi: string) => Promise<void>;
@@ -12,6 +13,12 @@ export type ReaderControls = {
   generateLocations: () => Promise<number>;
   next: () => Promise<void>;
   prev: () => Promise<void>;
+  search: (query: string, requestId?: number) => Promise<{ requestId: number; results: SearchResult[]; stale: boolean }>;
+  cancelSearch: () => void;
+  showSearchResult: (index: number) => Promise<number>;
+  nextSearchResult: () => Promise<number>;
+  previousSearchResult: () => Promise<number>;
+  clearSearch: () => void;
 };
 export type ReaderLocation = { start?: { cfi?: string; href?: string; displayed?: { page?: number; total?: number } }; percentage?: number; location?: number; totalLocations?: number };
 
@@ -22,6 +29,7 @@ export default function Reader({
   onToc,
   onReady,
   settings,
+  onFindShortcut,
 }: {
   bytes: ArrayBuffer;
   startCfi?: string;
@@ -29,6 +37,7 @@ export default function Reader({
   onToc?: (items: TocItem[]) => void;
   onReady?: (controls: ReaderControls | null) => void;
   settings: Settings;
+  onFindShortcut?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<any>(null);
@@ -125,6 +134,7 @@ export default function Reader({
       const doc: Document | undefined = section.document;
       if (!doc) return;
       const handler = (e: KeyboardEvent) => {
+        if (isFindShortcut(e)) { e.preventDefault(); onFindShortcut?.(); return; }
         if (isEditableTarget(e.target)) return;
         if (!renditionRef.current) return;
         if (e.key === 'ArrowRight') { e.preventDefault(); renditionRef.current.next(); }
@@ -156,6 +166,22 @@ export default function Reader({
     };
     rendition.on('rendered', onRendered);
 
+    let searchGeneration = 0;
+    let searchResults: SearchResult[] = [];
+    let searchIndex = -1;
+    const searchHighlights = new Set<string>();
+    const clearSearch = () => {
+      searchGeneration += 1;
+      for (const cfi of searchHighlights) rendition.annotations?.remove(cfi, 'highlight');
+      searchHighlights.clear(); searchResults = []; searchIndex = -1;
+    };
+    const showSearchResult = async (index: number) => {
+      if (!searchResults.length) return -1;
+      searchIndex = ((index % searchResults.length) + searchResults.length) % searchResults.length;
+      await rendition.display(searchResults[searchIndex].cfi);
+      return searchIndex;
+    };
+
     // Expose simple controls
     onReady?.({
       goTo: (tgt: string) => rendition.display(tgt),
@@ -169,10 +195,43 @@ export default function Reader({
       },
       next: () => rendition.next(),
       prev: () => rendition.prev(),
+      search: async (rawQuery: string, requestId = Date.now()) => {
+        const generation = ++searchGeneration;
+        for (const cfi of searchHighlights) rendition.annotations?.remove(cfi, 'highlight');
+        searchHighlights.clear(); searchResults = []; searchIndex = -1;
+        const query = rawQuery.trim();
+        if (!query) return { requestId, results: [], stale: false };
+        const navigation = await book.loaded.navigation;
+        const tocEntries: any[] = [];
+        const flatten = (items: any[]) => items.forEach(item => { tocEntries.push(item); flatten(item.subitems || item.children || []); });
+        flatten(navigation?.toc || []);
+        const found: SearchResult[] = [];
+        for (const section of book.spine.spineItems || []) {
+          if (generation !== searchGeneration) return { requestId, results: [], stale: true };
+          await section.load(book.load.bind(book));
+          const href = section.href || section.url || 'Chapter';
+          const label = tocEntries.find(item => String(item.href || '').split('#')[0] === String(href).split('#')[0])?.label || href;
+          for (const match of section.find(query) || []) {
+            const result = normalizeSearchResult(match, label);
+            if (result) found.push(result);
+          }
+          section.unload?.();
+        }
+        if (generation !== searchGeneration) return { requestId, results: [], stale: true };
+        searchResults = found;
+        for (const result of found) { rendition.annotations?.highlight(result.cfi, {}, undefined, 'driveread-search-highlight'); searchHighlights.add(result.cfi); }
+        return { requestId, results: found, stale: false };
+      },
+      cancelSearch: () => { searchGeneration += 1; },
+      showSearchResult,
+      nextSearchResult: () => showSearchResult(wrappedResultIndex(searchIndex, searchResults.length, 1)),
+      previousSearchResult: () => showSearchResult(wrappedResultIndex(searchIndex, searchResults.length, -1)),
+      clearSearch,
     });
 
     return () => {
       active = false;
+      clearSearch();
       // Invalidate parent controls before destroying their underlying rendition.
       onReady?.(null);
       renditionRef.current = null;

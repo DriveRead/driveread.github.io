@@ -1,6 +1,6 @@
 export const SETTINGS_KEY = 'driveread.settings.v1';
 export const SETTINGS_VERSION = 3 as const;
-export const CONTEXTUAL_PANELS = ['settings', 'contents', 'bookmarks', 'book-info'] as const;
+export const CONTEXTUAL_PANELS = ['settings', 'contents', 'find', 'bookmarks', 'book-info'] as const;
 export type ContextualPanelId = typeof CONTEXTUAL_PANELS[number];
 
 export const THEMES = ['system', 'light', 'sepia', 'dark'] as const;

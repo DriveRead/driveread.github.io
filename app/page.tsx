@@ -20,6 +20,10 @@ import ReaderToolbar from '@/src/components/ReaderToolbar';
 import ContentsPanel from '@/src/components/ContentsPanel';
 import type { TocItem } from '@/src/components/ContentsPanel';
 import { ShortcutsDialog } from '@/src/components/ReaderDialogs';
+import FindPanel from '@/src/components/FindPanel';
+import type { SearchResult } from '@/src/lib/readerSearch';
+import { isFindShortcut } from '@/src/lib/readerSearch';
+import { emptyReaderHistory, recordLocation, traverseHistory, type ReaderHistory } from '@/src/lib/readerHistory';
 
 const isDebug = typeof window !== 'undefined' && window.location.search.includes('debug=true');
 
@@ -47,6 +51,12 @@ export default function Home() {
   const [launch, setLaunch] = useState<DriveLaunchState>({ status: 'missing' });
   const [lifecycle, dispatchLifecycle] = useReducer(launchLifecycleReducer, { status: 'no-launch' } as LaunchLifecycle);
   const [selectedFile, setSelectedFile] = useState<DriveFileMetadata | null>(null);
+  const [findQuery, setFindQuery] = useState('');
+  const [findResults, setFindResults] = useState<SearchResult[]>([]);
+  const [findCurrent, setFindCurrent] = useState(-1);
+  const [findSearching, setFindSearching] = useState(false);
+  const [history, setHistory] = useState<ReaderHistory>(emptyReaderHistory);
+  const [copyAnnouncement, setCopyAnnouncement] = useState('');
 
   const saveTimer = useRef<number | null>(null);
   const controlsRef = useRef<ReaderControls | null>(null);
@@ -56,6 +66,8 @@ export default function Home() {
   const contentsButtonRef = useRef<HTMLButtonElement>(null);
   const bookmarksButtonRef = useRef<HTMLButtonElement>(null);
   const infoButtonRef = useRef<HTMLButtonElement>(null);
+  const findButtonRef = useRef<HTMLButtonElement>(null);
+  const findRequestRef = useRef(0);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
 
   useEffect(() => {
@@ -73,6 +85,27 @@ export default function Home() {
     const target = adjacentChapter(toc, currentHref, 1);
     if (target) controlsRef.current?.goTo(target.href);
   }
+
+  const changeFindQuery = (query: string) => {
+    setFindQuery(query); setFindCurrent(-1);
+    const requestId = ++findRequestRef.current;
+    controlsRef.current?.cancelSearch();
+    if (!query.trim()) { setFindResults([]); setFindSearching(false); controlsRef.current?.clearSearch(); return; }
+    setFindSearching(true);
+    controlsRef.current?.search(query, requestId).then(response => {
+      if (response.stale || response.requestId !== findRequestRef.current) return;
+      setFindResults(response.results); setFindSearching(false);
+    }).catch(() => { if (requestId === findRequestRef.current) { setFindResults([]); setFindSearching(false); } });
+  };
+  const showFindResult = async (index: number) => { const selected = await controlsRef.current?.showSearchResult(index); if (typeof selected === 'number') setFindCurrent(selected); };
+  const moveFindResult = async (direction: -1 | 1) => { const selected = await (direction === 1 ? controlsRef.current?.nextSearchResult() : controlsRef.current?.previousSearchResult()); if (typeof selected === 'number') setFindCurrent(selected); };
+  const clearFind = () => { findRequestRef.current += 1; controlsRef.current?.clearSearch(); setFindQuery(''); setFindResults([]); setFindCurrent(-1); setFindSearching(false); };
+  const moveHistory = (direction: -1 | 1) => setHistory(value => { const moved = traverseHistory(value, direction); if (moved.cfi) void controlsRef.current?.goTo(moved.cfi); return moved.history; });
+  const copyLocation = async () => {
+    if (!cfi) return;
+    try { if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText(cfi); setCopyAnnouncement('Location copied.'); }
+    catch { setCopyAnnouncement('Could not copy the location. Copying is not supported by this browser.'); }
+  };
 
   function persistProgress(next: Progress) {
     progressRef.current = next;
@@ -206,6 +239,7 @@ useEffect(() => {
     setTotal(null);
     setPercent(null);
     setLocations(null);
+    setHistory(emptyReaderHistory()); clearFind();
     try {
       const { metadata, buffer } = await downloadEpub(token, id, metadata => {
         setSelectedFile(metadata);
@@ -278,6 +312,7 @@ useEffect(() => {
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (controlsRef.current && isFindShortcut(e)) { e.preventDefault(); openPanel('find'); return; }
       if (isEditableTarget(e.target)) return;
       if (e.key === 'Escape') { setHelpOpen(false); if (!panel.pinned) closePanel(); setFocusMode(false); return; }
       if (e.key === '?') { e.preventDefault(); setHelpOpen(true); return; }
@@ -308,7 +343,7 @@ useEffect(() => {
     <AppShell theme={settings.theme}>
       <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={auth.scriptLoaded} onError={auth.scriptFailed} />
       {!focusMode && (
-        <ReaderToolbar bookTitle={selectedFile?.name} chapterTitle={currentChapter} hasBook={Boolean(bytes)} page={page} total={total} locations={locations} percent={percent} tocOpen={panel.active === 'contents'} settingsOpen={panel.active === 'settings'} bookmarked={bookmarked} syncLabel={syncLabel} onContents={() => openPanel('contents')} onSettings={() => openPanel('settings')} onPrev={() => controlsRef.current?.prev()} onNext={() => controlsRef.current?.next()} onPrevChapter={goToPrevChapter} onNextChapter={goToNextChapter} onBookmark={toggleBookmark} onBookmarks={() => openPanel('bookmarks')} onBookInfo={() => openPanel('book-info')} onHelp={() => setHelpOpen(true)} onSeek={value => controlsRef.current?.goToPercentage(value / 100)} onFocus={() => setFocusMode(true)} settingsButtonRef={settingsButtonRef} contentsButtonRef={contentsButtonRef} bookmarksButtonRef={bookmarksButtonRef} infoButtonRef={infoButtonRef} />
+        <ReaderToolbar bookTitle={selectedFile?.name} chapterTitle={currentChapter} hasBook={Boolean(bytes)} page={page} total={total} locations={locations} percent={percent} tocOpen={panel.active === 'contents'} settingsOpen={panel.active === 'settings'} bookmarked={bookmarked} syncLabel={syncLabel} canGoBack={history.index > 0} canGoForward={history.index >= 0 && history.index < history.entries.length - 1} onContents={() => openPanel('contents')} onFind={() => openPanel('find')} onCopyLocation={copyLocation} onBack={() => moveHistory(-1)} onForward={() => moveHistory(1)} onSettings={() => openPanel('settings')} onPrev={() => controlsRef.current?.prev()} onNext={() => controlsRef.current?.next()} onPrevChapter={goToPrevChapter} onNextChapter={goToNextChapter} onBookmark={toggleBookmark} onBookmarks={() => openPanel('bookmarks')} onBookInfo={() => openPanel('book-info')} onHelp={() => setHelpOpen(true)} onSeek={value => controlsRef.current?.goToPercentage(value / 100)} onFocus={() => setFocusMode(true)} settingsButtonRef={settingsButtonRef} contentsButtonRef={contentsButtonRef} findButtonRef={findButtonRef} bookmarksButtonRef={bookmarksButtonRef} infoButtonRef={infoButtonRef} />
       )}
       <div className={`reader-layout${panel.pinned ? ' has-pinned-panel' : ''}`}>
       <div className={`reader-workspace${focusMode ? ' is-focus-mode' : ''}`}>
@@ -321,10 +356,12 @@ useEffect(() => {
                 bytes={bytes}
                 startCfi={cfi}
                 settings={settings}
+                onFindShortcut={() => openPanel('find')}
                 onRelocate={(loc) => {
                   const newCfi: string | undefined = loc?.start?.cfi;
                   if (newCfi) {
                     setCfi(newCfi);
+                    setHistory(value => recordLocation(value, newCfi));
                   }
                   const newHref: string | undefined = loc?.start?.href;
                   setCurrentHref(newHref || null);
@@ -352,13 +389,15 @@ useEffect(() => {
           )}
         </main>
       </div>
-      <ContextualPanel open={Boolean(panel.active)} pinned={panel.pinned} title={panel.active === 'settings' ? 'Reading settings' : panel.active === 'contents' ? 'Contents' : panel.active === 'bookmarks' ? 'Bookmarks' : 'Book information'} side="end" openerRef={panel.active === 'settings' ? settingsButtonRef : panel.active === 'contents' ? contentsButtonRef : panel.active === 'bookmarks' ? bookmarksButtonRef : infoButtonRef} onPin={pinPanel} onUnpin={unpinPanel} onClose={closePanel}>
+      <ContextualPanel open={Boolean(panel.active)} pinned={panel.pinned} title={panel.active === 'settings' ? 'Reading settings' : panel.active === 'contents' ? 'Contents' : panel.active === 'find' ? 'Find in book' : panel.active === 'bookmarks' ? 'Bookmarks' : 'Book information'} side="end" openerRef={panel.active === 'settings' ? settingsButtonRef : panel.active === 'contents' ? contentsButtonRef : panel.active === 'find' ? findButtonRef : panel.active === 'bookmarks' ? bookmarksButtonRef : infoButtonRef} onPin={pinPanel} onUnpin={unpinPanel} onClose={closePanel}>
         {panel.active === 'contents' && <ContentsPanel items={toc} currentHref={currentHref} onSelect={href => { controlsRef.current?.goTo(href); if (!panel.pinned) closePanel(); }} />}
+        {panel.active === 'find' && <FindPanel query={findQuery} results={findResults} current={findCurrent} searching={findSearching} onQuery={changeFindQuery} onPrevious={() => moveFindResult(-1)} onNext={() => moveFindResult(1)} onClear={clearFind} onSelect={showFindResult} />}
         {panel.active === 'settings' && <SettingsPanel settings={settings} onChange={setSettings} canFocus={Boolean(bytes)} onFocusMode={() => { setFocusMode(true); closePanel(); }} />}
         {panel.active === 'bookmarks' && <div className="panel-body">{currentBookmarks.length ? <ul className="bookmark-list">{currentBookmarks.map(bookmark => <li key={bookmark.cfi}><button onClick={() => { controlsRef.current?.goTo(bookmark.cfi); if (!panel.pinned) closePanel(); }}>{bookmark.label || new Date(bookmark.created).toLocaleString()}</button><button aria-label={`Remove ${bookmark.label || 'bookmark'}`} onClick={() => { if (fileId && progressRef.current[fileId]) persistProgress({ ...progressRef.current, [fileId]: removeBookmark(progressRef.current[fileId], bookmark.cfi) }); }}>Remove</button></li>)}</ul> : <p className="empty-state">No bookmarks yet.</p>}</div>}
         {panel.active === 'book-info' && <dl className="book-information panel-body"><dt>Title</dt><dd>{selectedFile?.name || 'Unknown'}</dd><dt>Current chapter</dt><dd>{currentChapter || 'Unknown'}</dd><dt>Progress</dt><dd>{percent === null ? 'Not available' : `${percent}%`}</dd></dl>}
       </ContextualPanel>
       </div>
+      <p className="sr-only" role="status" aria-live="polite">{copyAnnouncement}</p>
       <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </AppShell>
   );
