@@ -4,7 +4,7 @@ import type { Bookmark } from '@/src/lib/progress';
 const shortcuts = [
   ['← / →', 'Previous / next page'], ['Shift + ← / →', 'Previous / next chapter'],
   ['C', 'Open contents'], ['S', 'Open settings'], ['B', 'Toggle bookmark'],
-  ['F', 'Toggle focus mode'], ['?', 'Show this help'], ['Escape', 'Close a dialog or exit focus mode'],
+  ['Ctrl/Command + F', 'Find in book'], ['F', 'Toggle focus mode'], ['?', 'Show this help'], ['Escape', 'Close a dialog or exit focus mode'],
 ];
 
 export function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
