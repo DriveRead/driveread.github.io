@@ -1,8 +1,8 @@
 'use client';
 import { type ReactNode, type RefObject, useEffect, useRef } from 'react';
 
-export default function ContextualPanel({ open, pinned, title, side = 'end', openerRef, onPin, onUnpin, onClose, children }: {
-  open: boolean; pinned: boolean; title: string; side?: 'start' | 'end'; openerRef?: RefObject<HTMLElement>;
+export default function ContextualPanel({ open, pinned, canPin, title, side = 'end', openerRef, onPin, onUnpin, onClose, children }: {
+  open: boolean; pinned: boolean; canPin: boolean; title: string; side?: 'start' | 'end'; openerRef?: RefObject<HTMLElement>;
   onPin: () => void; onUnpin: () => void; onClose: () => void; children: ReactNode;
 }) {
   const panelRef = useRef<HTMLElement>(null);
@@ -35,7 +35,7 @@ export default function ContextualPanel({ open, pinned, title, side = 'end', ope
     {!pinned && <button className="sheet-backdrop" tabIndex={-1} aria-label={`Close ${title}`} onClick={onClose} />}
     <aside ref={panelRef} className={`contextual-panel side-sheet sheet-${side} ${pinned ? 'is-pinned' : 'is-temporary'}`} role={pinned ? 'complementary' : 'dialog'} aria-modal={pinned ? undefined : true} aria-labelledby={titleId}>
       <header className="sheet-heading"><h2 id={titleId}>{title}</h2><div className="panel-header-actions">
-        <button className="pin-button" aria-pressed={pinned} title={pinned ? 'Unpin panel' : 'Keep panel open'} onClick={pinned ? onUnpin : onPin}><span aria-hidden="true">{pinned ? '◆' : '◇'}</span><span>{pinned ? 'Unpin' : 'Pin'}</span></button>
+        {(canPin || pinned) && <button className="pin-button" aria-pressed={pinned} title={pinned ? 'Unpin panel' : 'Keep panel open'} onClick={pinned ? onUnpin : onPin}><span aria-hidden="true">{pinned ? '◆' : '◇'}</span><span>{pinned ? 'Unpin' : 'Pin'}</span></button>}
         <button onClick={onClose} aria-label={`Close ${title}`} title={`Close ${title}`}>× <span>Close</span></button>
       </div></header>{children}
     </aside>
