@@ -3,7 +3,7 @@ import ReadingProgress from './ReadingProgress';
 
 /* eslint-disable jsx-a11y/role-supports-aria-props -- Preserve the button's aria-pressed API while also exposing menu checkbox semantics. */
 
-type Props = { bookTitle?: string; chapterTitle?: string; hasBook: boolean; page: number | null; total: number | null; locations: number | null; percent: number | null; tocOpen: boolean; settingsOpen: boolean; bookmarked: boolean; syncLabel: string; canGoBack: boolean; canGoForward: boolean; onContents: () => void; onFind: () => void; onCopyLocation: () => void; onBack: () => void; onForward: () => void; onSettings: () => void; onPrev: () => void; onNext: () => void; onPrevChapter: () => void; onNextChapter: () => void; onBookmark: () => void; onBookmarks: () => void; onBookInfo: () => void; onHelp: () => void; onSeek: (percentage: number) => void; onFocus: () => void; settingsButtonRef: RefObject<HTMLButtonElement>; contentsButtonRef: RefObject<HTMLButtonElement>; findButtonRef: RefObject<HTMLButtonElement>; bookmarksButtonRef: RefObject<HTMLButtonElement>; infoButtonRef: RefObject<HTMLButtonElement> };
+type Props = { bookTitle?: string; chapterTitle?: string; hasBook: boolean; page: number | null; total: number | null; locations: number | null; percent: number | null; tocOpen: boolean; settingsOpen: boolean; bookmarked: boolean; syncLabel: string; canGoBack: boolean; canGoForward: boolean; onContents: () => void; onFind: () => void; onCopyLocation: () => void; onBack: () => void; onForward: () => void; onSettings: () => void; onPrev: () => void; onNext: () => void; onPrevChapter: () => void; onNextChapter: () => void; onBookmark: () => void; onBookmarks: () => void; onBookInfo: () => void; onHelp: () => void; onSeek: (percentage: number) => void; onFocus: () => void; settingsButtonRef: RefObject<HTMLButtonElement>; contentsButtonRef: RefObject<HTMLButtonElement>; findButtonRef: RefObject<HTMLButtonElement>; bookmarksButtonRef: RefObject<HTMLButtonElement>; infoButtonRef: RefObject<HTMLButtonElement>; helpButtonRef: RefObject<HTMLButtonElement> };
 
 export default function ReaderToolbar(p: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -77,7 +77,7 @@ export default function ReaderToolbar(p: Props) {
           <button role="menuitem" tabIndex={menuTabIndex} onClick={() => runMenuAction(p.onCopyLocation)} disabled={!p.hasBook} title="Copy location">Copy location</button>
           <button role="menuitem" tabIndex={menuTabIndex} onClick={() => runMenuAction(p.onFocus)} disabled={!p.hasBook} title="Enter distraction-free reading">⛶ <span>Focus mode</span></button>
           <button ref={p.settingsButtonRef} role="menuitem" tabIndex={menuTabIndex} onFocus={() => setMenuOpen(true)} onClick={() => runMenuAction(p.onSettings)} aria-haspopup="dialog" aria-expanded={p.settingsOpen}>Aa <span>Settings</span></button>
-          <button role="menuitem" tabIndex={menuTabIndex} onClick={() => runMenuAction(p.onHelp)} title="Keyboard shortcuts (?)">? <span>Keyboard shortcuts</span></button>
+          <button ref={p.helpButtonRef} role="menuitem" tabIndex={menuTabIndex} onFocus={() => setMenuOpen(true)} onClick={() => runMenuAction(p.onHelp)} title="Keyboard shortcuts (?)">? <span>Keyboard shortcuts</span></button>
         </div>
       </div>
     </div>

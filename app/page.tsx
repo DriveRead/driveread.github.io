@@ -67,6 +67,7 @@ export default function Home() {
   const bookmarksButtonRef = useRef<HTMLButtonElement>(null);
   const infoButtonRef = useRef<HTMLButtonElement>(null);
   const findButtonRef = useRef<HTMLButtonElement>(null);
+  const helpButtonRef = useRef<HTMLButtonElement>(null);
   const findRequestRef = useRef(0);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
 
@@ -343,7 +344,7 @@ useEffect(() => {
     <AppShell theme={settings.theme}>
       <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={auth.scriptLoaded} onError={auth.scriptFailed} />
       {!focusMode && (
-        <ReaderToolbar bookTitle={selectedFile?.name} chapterTitle={currentChapter} hasBook={Boolean(bytes)} page={page} total={total} locations={locations} percent={percent} tocOpen={panel.active === 'contents'} settingsOpen={panel.active === 'settings'} bookmarked={bookmarked} syncLabel={syncLabel} canGoBack={history.index > 0} canGoForward={history.index >= 0 && history.index < history.entries.length - 1} onContents={() => openPanel('contents')} onFind={() => openPanel('find')} onCopyLocation={copyLocation} onBack={() => moveHistory(-1)} onForward={() => moveHistory(1)} onSettings={() => openPanel('settings')} onPrev={() => controlsRef.current?.prev()} onNext={() => controlsRef.current?.next()} onPrevChapter={goToPrevChapter} onNextChapter={goToNextChapter} onBookmark={toggleBookmark} onBookmarks={() => openPanel('bookmarks')} onBookInfo={() => openPanel('book-info')} onHelp={() => setHelpOpen(true)} onSeek={value => controlsRef.current?.goToPercentage(value / 100)} onFocus={() => setFocusMode(true)} settingsButtonRef={settingsButtonRef} contentsButtonRef={contentsButtonRef} findButtonRef={findButtonRef} bookmarksButtonRef={bookmarksButtonRef} infoButtonRef={infoButtonRef} />
+        <ReaderToolbar bookTitle={selectedFile?.name} chapterTitle={currentChapter} hasBook={Boolean(bytes)} page={page} total={total} locations={locations} percent={percent} tocOpen={panel.active === 'contents'} settingsOpen={panel.active === 'settings'} bookmarked={bookmarked} syncLabel={syncLabel} canGoBack={history.index > 0} canGoForward={history.index >= 0 && history.index < history.entries.length - 1} onContents={() => openPanel('contents')} onFind={() => openPanel('find')} onCopyLocation={copyLocation} onBack={() => moveHistory(-1)} onForward={() => moveHistory(1)} onSettings={() => openPanel('settings')} onPrev={() => controlsRef.current?.prev()} onNext={() => controlsRef.current?.next()} onPrevChapter={goToPrevChapter} onNextChapter={goToNextChapter} onBookmark={toggleBookmark} onBookmarks={() => openPanel('bookmarks')} onBookInfo={() => openPanel('book-info')} onHelp={() => setHelpOpen(true)} onSeek={value => controlsRef.current?.goToPercentage(value / 100)} onFocus={() => setFocusMode(true)} settingsButtonRef={settingsButtonRef} contentsButtonRef={contentsButtonRef} findButtonRef={findButtonRef} bookmarksButtonRef={bookmarksButtonRef} infoButtonRef={infoButtonRef} helpButtonRef={helpButtonRef} />
       )}
       <div className={`reader-layout${panel.pinned ? ' has-pinned-panel' : ''}`}>
       <div className={`reader-workspace${focusMode ? ' is-focus-mode' : ''}`}>
@@ -398,7 +399,7 @@ useEffect(() => {
       </ContextualPanel>
       </div>
       <p className="sr-only" role="status" aria-live="polite">{copyAnnouncement}</p>
-      <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} openerRef={helpButtonRef} />
     </AppShell>
   );
 }
