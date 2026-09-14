@@ -147,18 +147,6 @@ export default function Home() {
     }
   }, []);
 
-  // Automatically sign in when launched from Google Drive
-useEffect(() => {
-  if (
-    lifecycle.status === 'awaiting-authentication' && auth.status === 'ready'
-  ) {
-    dispatchLifecycle({ type: 'REQUEST_ACCESS' });
-    auth.request();
-  }
-// The hook exposes stable callbacks; depending on the whole discriminated object would retrigger requests.
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [lifecycle.status, auth.status, auth.request]);
-
   useEffect(() => {
     if (auth.status !== 'error' || lifecycle.status === 'recoverable-error' || !('fileId' in lifecycle)) return;
     const kind: LaunchErrorKind = auth.error.kind === 'configuration' ? 'configuration' : auth.error.kind === 'permission-denied' ? 'permission-denied' : 'authentication';
@@ -281,6 +269,12 @@ useEffect(() => {
       openFile(lifecycle.fileId);
     }
   }
+
+  function authenticateLaunch() {
+    if (lifecycle.status !== 'awaiting-authentication' || auth.status !== 'ready') return;
+    dispatchLifecycle({ type: 'REQUEST_ACCESS' });
+    auth.request();
+  }
   
   // persist settings when changed
   useEffect(() => { if (settingsHydrated) saveSettings(settings); }, [settings, settingsHydrated]);
@@ -386,7 +380,7 @@ useEffect(() => {
               {focusMode && <nav className="focus-controls" aria-label="Distraction-free reading controls"><button onClick={goToPrevChapter} disabled={!currentHref} aria-label="Previous chapter">← <span>Chapter</span></button><div className="focus-progress"><strong>{currentChapter || selectedFile?.name}</strong><span>{percent !== null ? `${percent}%` : ''}</span></div><button onClick={goToNextChapter} disabled={!currentHref} aria-label="Next chapter"><span>Chapter</span> →</button><button className="exit-focus" onClick={() => setFocusMode(false)} title="Exit distraction-free mode (Escape)">Exit focus <span aria-hidden="true">×</span></button></nav>}
             </>
           ) : (
-            <LaunchScreen launch={launch} lifecycle={lifecycle} onRetry={retryLaunch} />
+            <LaunchScreen launch={launch} lifecycle={lifecycle} authReady={auth.status === 'ready'} onAuthenticate={authenticateLaunch} onRetry={retryLaunch} />
           )}
         </main>
       </div>
