@@ -28,3 +28,15 @@ test('a pinned panel becomes a temporary modal when the viewport narrows', async
   await expect(temporaryPanel.getByRole('button', { name: /^(Pin|Unpin)$/ })).toHaveCount(0);
   await expect(page.locator('button.sheet-backdrop[aria-label="Close Contents"]')).toBeVisible();
 });
+
+test('the temporary panel backdrop stays translucent when hovered', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await openContents(page);
+
+  const backdrop = page.locator('button.sheet-backdrop[aria-label="Close Contents"]');
+  const backgroundBeforeHover = await backdrop.evaluate(element => getComputedStyle(element).backgroundColor);
+  await backdrop.hover({ position: { x: 10, y: 400 } });
+
+  await expect(backdrop).toHaveCSS('background-color', backgroundBeforeHover);
+  await expect(backdrop).toHaveCSS('background-color', 'rgba(15, 23, 42, 0.42)');
+});
