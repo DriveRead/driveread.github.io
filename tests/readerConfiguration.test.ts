@@ -32,6 +32,7 @@ test('every configured reader font exists at its deployed public path', () => {
 
 test('container reflow resizes at and restores the current CFI', () => {
   assert.match(readerSource, /new ResizeObserver/);
-  assert.match(readerSource, /rendition\?\.resize\?\./);
+  assert.match(readerSource, /if \(!rendition\?\.manager\?\.isRendered\?\.\(\)\) return;/);
+  assert.match(readerSource, /rendition\.resize\(/);
   assert.match(readerSource, /if \(currentCfi\) rendition\.display\(currentCfi\)/);
 });

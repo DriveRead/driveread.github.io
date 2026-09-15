@@ -319,8 +319,13 @@ export default function Reader({
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const rendition = renditionRef.current;
+        // ResizeObserver can run before epub.js has created and attached its
+        // view manager. Rendition.resize() does not guard that internal state,
+        // so calling it during startup throws while trying to access the
+        // manager's resize method.
+        if (!rendition?.manager?.isRendered?.()) return;
         const currentCfi = rendition?.location?.start?.cfi;
-        rendition?.resize?.(container.clientWidth, container.clientHeight);
+        rendition.resize(container.clientWidth, container.clientHeight);
         if (currentCfi) rendition.display(currentCfi);
       });
     });
