@@ -2,7 +2,7 @@ import ePub from 'epubjs';
 import { useEffect, useRef } from 'react';
 import type { Settings } from '@/src/lib/settings';
 import type { TocItem } from './ContentsPanel';
-import { isEditableTarget } from '@/src/lib/readerNavigation';
+import { initialReadingTarget, isEditableTarget } from '@/src/lib/readerNavigation';
 import { openExternalEpubLink, classifyEpubLink } from '@/src/lib/readerSecurity';
 import { publicAssetUrl, readerFontStylesheet, READER_FONT_ASSETS } from '@/src/lib/readerAssets';
 import { isFindShortcut, normalizeSearchResult, wrappedResultIndex, type SearchResult } from '@/src/lib/readerSearch';
@@ -100,8 +100,17 @@ export default function Reader({
     };
     rendition.hooks.content.register(injectReaderFonts);
 
-    // Start location
-    rendition.display(startCfi || undefined);
+    let active = true;
+
+    // Wait for the spine before choosing a start location. A missing/obsolete
+    // saved CFI and books whose spine has no linear items otherwise cause
+    // epub.js to reject display() with an unhandled "No Section Found" error.
+    void book.ready.then(() => {
+      if (!active) return;
+      return rendition.display(initialReadingTarget(book.spine, startCfi));
+    }).catch((error: unknown) => {
+      if (active) console.error('The EPUB does not contain readable content.', error);
+    });
 
     // Relocation → bubble full 'loc'
     const onRelocated = (loc: any) => {
@@ -116,7 +125,6 @@ export default function Reader({
     rendition.on('relocated', onRelocated);
 
     // TOC
-    let active = true;
     book.loaded.navigation.then((nav: any) => {
       if (!active) return;
       const mapItem = (i: any): TocItem => ({
